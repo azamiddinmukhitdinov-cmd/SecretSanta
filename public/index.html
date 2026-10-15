@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#173d31" />
+    <meta name="theme-color" content="#102f43" />
     <meta name="robots" content="noindex, nofollow, noarchive" />
     <meta name="referrer" content="no-referrer" />
     <meta name="description" content="Семейный Тайный Санта — 2027. Немного волшебства для самых близких." />
@@ -14,6 +14,10 @@
   </head>
   <body>
     <a class="skip-link" href="#main">Перейти к содержимому</a>
+    <div class="winter-backdrop" aria-hidden="true"></div>
+    <div class="holiday-garland" aria-hidden="true">
+      <span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span><span class="garland-bulb"></span>
+    </div>
     <header class="site-header">
       <a class="brand" href="/" aria-label="Семейный Тайный Санта — главная">
         <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 44" fill="none"><path d="M20 3 7 22h8L4 34h32L25 22h8L20 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M20 34v7M20 0v6M17 3h6" stroke="currentColor" stroke-width="1.5"/></svg></span>
@@ -21,6 +25,12 @@
       </a>
       <nav id="navigation" class="navigation" aria-label="Основная навигация"></nav>
     </header>
+    <div class="season-controls">
+      <button class="motion-toggle" type="button" data-action="toggle-motion" aria-pressed="false" aria-label="Приостановить анимацию снега и гирлянды">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M9 5l3 3 3-3M9 19l3-3 3 3M4.5 11l4-1-1-4M19.5 13l-4 1 1 4M4.5 13l4 1-1 4M19.5 11l-4-1 1-4"/></svg>
+        <span class="motion-toggle-label">Приостановить снег</span>
+      </button>
+    </div>
     <main id="main" tabindex="-1">
       <div class="initial-loading"><span class="loading-star" aria-hidden="true">✧</span><p>Собираем немного волшебства…</p></div>
     </main>

@@ -12,14 +12,44 @@ export class AppError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
+const normalizeName = name => name.normalize('NFKC').trim().replace(/\s+/gu, ' ');
+const normalizedNameKey = name => normalizeName(name).toLocaleLowerCase('ru');
+const validName = name => typeof name === 'string' && name.length >= 1 && name.length <= 60 && !/[\u0000-\u001f\u007f]/u.test(name);
+const copyProfile = profile => profile ? { id: profile.id, name: profile.name, role: profile.role, crop: [...profile.crop] } : null;
+
+function readProfiles(path) {
+  let raw;
+  try { raw = readFileSync(path, 'utf8'); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  const invalid = () => new Error('Проверьте data/family-profiles.json: нужны уникальные id и имена, роль до 60 символов и crop внутри изображения 1536×1024.');
+  let values;
+  try { values = JSON.parse(raw); } catch { throw invalid(); }
+  if (!Array.isArray(values)) throw invalid();
+  const ids = new Set();
+  const names = new Set();
+  return values.map(value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.id !== 'string' || !/^[a-z0-9-]{1,40}$/.test(value.id)) throw invalid();
+    const name = typeof value.name === 'string' ? normalizeName(value.name) : null;
+    if (!validName(name) || typeof value.role !== 'string' || value.role.length > 60 || /[\u0000-\u001f\u007f]/u.test(value.role)) throw invalid();
+    if (!Array.isArray(value.crop) || value.crop.length !== 4 || !value.crop.every(part => typeof part === 'number' && Number.isFinite(part) && part >= 0)) throw invalid();
+    const [x, y, width, height] = value.crop;
+    if (width <= 0 || height <= 0 || x + width > 1536 || y + height > 1024) throw invalid();
+    const key = normalizedNameKey(name);
+    if (ids.has(value.id) || names.has(key)) throw invalid();
+    ids.add(value.id);
+    names.add(key);
+    return { id: value.id, name, role: value.role.trim(), crop: [...value.crop] };
+  });
+}
+
 export function validateCard(input, { allowDraft = false } = {}) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError(400, 'Проверьте данные карточки.');
   const { name, wishes = '', avoid = '', links = [], ready = !allowDraft } = input;
   if (typeof name !== 'string' || typeof wishes !== 'string' || typeof avoid !== 'string' || typeof ready !== 'boolean') {
     throw new AppError(400, 'Проверьте поля карточки.');
   }
-  const cleanName = name.normalize('NFKC').trim().replace(/\s+/gu, ' ');
-  if (!cleanName || cleanName.length > 60 || /[\u0000-\u001f\u007f]/u.test(cleanName)) throw new AppError(400, 'Укажите имя длиной от 1 до 60 символов.');
+  const cleanName = normalizeName(name);
+  if (!validName(cleanName)) throw new AppError(400, 'Укажите имя длиной от 1 до 60 символов.');
   if (wishes.length > 2000 || avoid.length > 1000) throw new AppError(400, 'Пожелания — до 2000 символов, нежелательные подарки — до 1000.');
   if (!Array.isArray(links) || links.length > 5) throw new AppError(400, 'Можно добавить до пяти ссылок на подарки.');
   const cleanLinks = links.map((link) => {
@@ -51,6 +81,9 @@ export function createStore(directory) {
   const dataDir = resolve(directory);
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   chmodSync(dataDir, 0o700);
+  const profiles = readProfiles(join(dataDir, 'family-profiles.json'));
+  const profileById = new Map(profiles.map(profile => [profile.id, profile]));
+  const profileByName = new Map(profiles.map(profile => [normalizedNameKey(profile.name), profile]));
   const databasePath = join(dataDir, 'santa.sqlite');
   const accessPath = join(dataDir, 'access.json');
   if (!existsSync(accessPath)) {
@@ -85,7 +118,8 @@ export function createStore(directory) {
       links TEXT NOT NULL DEFAULT '[]',
       approved INTEGER NOT NULL DEFAULT 0,
       ready INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      profile_id TEXT
     );
     CREATE TABLE IF NOT EXISTS credentials (
       token_hash TEXT PRIMARY KEY,
@@ -98,11 +132,23 @@ export function createStore(directory) {
       draw_version INTEGER NOT NULL,
       CHECK(giver_id <> recipient_id)
     );
-    PRAGMA user_version = 1;
   `);
+  // Existing databases retain every card, credential and assignment. Profiles
+  // are optional metadata, so legacy cards remain unbound until explicitly added.
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    if (!db.prepare('PRAGMA table_info(participants)').all().some(column => column.name === 'profile_id')) {
+      db.exec('ALTER TABLE participants ADD COLUMN profile_id TEXT');
+    }
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS participants_profile_id_unique ON participants(profile_id); PRAGMA user_version = 2; COMMIT;');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    db.close();
+    throw error;
+  }
   db.prepare("INSERT OR IGNORE INTO credentials(token_hash,kind) VALUES (?, 'admin')").run(hash(access.adminToken));
 
-  const card = row => row ? ({ id: row.id, name: row.name, wishes: row.wishes, avoid: row.avoid, links: JSON.parse(row.links), approved: Boolean(row.approved), ready: Boolean(row.ready) }) : null;
+  const card = row => row ? ({ id: row.id, name: row.name, wishes: row.wishes, avoid: row.avoid, links: JSON.parse(row.links), approved: Boolean(row.approved), ready: Boolean(row.ready), profileId: row.profile_id ?? null, profile: copyProfile(profileById.get(row.profile_id)) }) : null;
   const transaction = fn => {
     db.exec('BEGIN IMMEDIATE');
     try { const result = fn(); db.exec('COMMIT'); return result; }
@@ -111,6 +157,10 @@ export function createStore(directory) {
   const settings = () => db.prepare('SELECT * FROM settings WHERE id = 1').get();
   const participants = () => db.prepare('SELECT * FROM participants ORDER BY created_at, rowid').all().map(card);
   const participant = id => card(db.prepare('SELECT * FROM participants WHERE id = ?').get(id));
+  const listProfiles = () => {
+    const claimed = new Set(db.prepare('SELECT profile_id FROM participants WHERE profile_id IS NOT NULL').all().map(row => row.profile_id));
+    return profiles.map(profile => ({ ...copyProfile(profile), claimed: claimed.has(profile.id) }));
+  };
   const requireRegistrationPhase = () => {
     if (settings().phase !== 'registration') throw new AppError(409, 'Сначала отмените жеребьёвку. Прежние назначения станут недействительными.');
   };
@@ -122,14 +172,28 @@ export function createStore(directory) {
     requireRegistrationPhase();
     if (!admin && !registrationOpen(now)) throw new AppError(409, 'Приём карточек закрыт. Обратитесь к организатору.');
     if (db.prepare('SELECT COUNT(*) AS total FROM participants').get().total >= 100) throw new AppError(409, 'В игре уже 100 участников. Обратитесь к организатору.');
-    const value = validateCard(input, { allowDraft: admin });
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new AppError(400, 'Проверьте данные карточки.');
+    let profile = null;
+    if (input.profileId != null) {
+      if (typeof input.profileId !== 'string') throw new AppError(400, 'Выберите участника на семейном фото.');
+      profile = profileById.get(input.profileId);
+      if (!profile) throw new AppError(404, 'Этот участник на семейном фото не найден.');
+    } else if (!admin && profiles.length) {
+      throw new AppError(400, 'Выберите себя на семейном фото.');
+    } else if (admin && typeof input.name === 'string') {
+      profile = profileByName.get(normalizedNameKey(input.name)) ?? null;
+    }
+    if (profile && db.prepare('SELECT 1 FROM participants WHERE profile_id = ?').get(profile.id)) {
+      throw new AppError(409, 'Карточка этого участника уже создана. Откройте свою личную ссылку или обратитесь к организатору.');
+    }
+    const value = validateCard(profile ? { ...input, name: profile.name } : input, { allowDraft: admin });
     if (db.prepare('SELECT 1 FROM participants WHERE normalized_name = ?').get(value.normalizedName)) {
       throw new AppError(409, 'Карточка с таким именем уже есть. Откройте свою личную ссылку или уточните имя.');
     }
     const id = randomUUID();
     const personalToken = token();
-    db.prepare('INSERT INTO participants(id,name,normalized_name,wishes,avoid,links,approved,ready,created_at) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(id, value.name, value.normalizedName, value.wishes, value.avoid, JSON.stringify(value.links), admin ? 1 : 0, value.ready ? 1 : 0, now.getTime());
+    db.prepare('INSERT INTO participants(id,name,normalized_name,wishes,avoid,links,approved,ready,created_at,profile_id) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(id, value.name, value.normalizedName, value.wishes, value.avoid, JSON.stringify(value.links), admin ? 1 : 0, value.ready ? 1 : 0, now.getTime(), profile?.id ?? null);
     db.prepare("INSERT INTO credentials(token_hash,kind,participant_id) VALUES (?, 'participant', ?)").run(hash(personalToken), id);
     return { participant: participant(id), personalToken };
   });
@@ -138,7 +202,10 @@ export function createStore(directory) {
     if (!current) throw new AppError(403, 'Личный доступ больше не действует. Обратитесь к организатору.');
     const s = settings();
     if (!registrationOpen(now) && !s.editing_open) throw new AppError(409, 'Редактирование карточек закрыто. Обратитесь к организатору.');
+    if (Object.hasOwn(input, 'profileId') && input.profileId !== current.profileId) throw new AppError(409, 'Нельзя заменить участника в существующей карточке. Обратитесь к организатору.');
     const value = validateCard({ ...current, ...input });
+    if (current.profileId && value.name !== current.name) throw new AppError(409, 'Имя участника на семейном фото изменить нельзя. Обратитесь к организатору.');
+    if (!current.profileId && value.name !== current.name && profileByName.has(value.normalizedName)) throw new AppError(409, 'Для участника на семейном фото нужно создать отдельную карточку по приглашению.');
     if (s.phase === 'drawn' && value.name !== current.name) throw new AppError(409, 'После жеребьёвки можно менять только пожелания и ссылки.');
     const duplicate = db.prepare('SELECT id FROM participants WHERE normalized_name = ? AND id <> ?').get(value.normalizedName, id);
     if (duplicate) throw new AppError(409, 'Карточка с таким именем уже есть. Уточните имя.');
@@ -212,5 +279,5 @@ export function createStore(directory) {
     return result;
   };
 
-  return { db, dataDir, access, settings, participants, participant, registrationOpen, credential, assignments, recipient, createParticipant, editParticipant, adminAction, close: () => db.close() };
+  return { db, dataDir, access, settings, participants, participant, listProfiles, registrationOpen, credential, assignments, recipient, createParticipant, editParticipant, adminAction, close: () => db.close() };
 }

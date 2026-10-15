@@ -100,6 +100,7 @@ export function createApp({ dataDir = './data', clock = () => new Date(), rateLi
     const result = {
       game: { title: 'Семейный Тайный Санта — 2027', budgetMin: 50, budgetMax: 100, currency: 'USD', deadline: DEADLINE, exchangeDate: EXCHANGE_DATE, timezone: 'Asia/Tashkent', phase: s.phase, registrationOpen: store.registrationOpen(now), editingOpen: Boolean(s.editing_open), drawVersion: s.draw_version, participantCount: store.participants().length },
       access, participant, recipient: participant?.approved && s.phase === 'drawn' ? store.recipient(participant.id) : null,
+      profiles: access === 'locked' ? [] : store.listProfiles(),
     };
     if (authentication.admin) result.admin = { participants: store.participants(), assignments: store.assignments(), invitationUrl: `${origin}/#invite=${store.access.inviteToken}` };
     return result;
@@ -175,7 +176,7 @@ export function createApp({ dataDir = './data', clock = () => new Date(), rateLi
         response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
         return response.end('User-agent: *\nDisallow: /\n');
       }
-      const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'], '/favicon.svg': ['favicon.svg', 'image/svg+xml'] };
+      const files = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'], '/favicon.svg': ['favicon.svg', 'image/svg+xml'], '/winter-scene.webp': ['winter-scene.webp', 'image/webp'] };
       if (!Object.hasOwn(files, path)) throw new AppError(404, 'Страница не найдена.');
       const [name, contentType] = files[path];
       const body = await readFile(join(publicDir, name));
