@@ -36,6 +36,7 @@ const symbols = {
   lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3m-4 5v2"/>',
   copy: '<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
+  share: '<path d="M12 16V3m-4 4 4-4 4 4M7 10H4v11h16V10h-3"/>',
   refresh: '<path d="M20 8a8 8 0 1 0 .2 8M20 3v5h-5"/>',
   close: '<path d="m6 6 12 12M6 18 18 6"/>',
   trash: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/>',
@@ -161,7 +162,7 @@ function hero() {
       <h1 id="hero-title">Семейный<br>Тайный Санта<br><em>— 2027</em></h1>
       <p class="hero-description">Один маленький секрет, много улыбок и подарки, выбранные с теплом. Пусть этот Новый год начнётся с радости.</p>
       <p class="hero-caption">Ведь главное — мы вместе.</p>
-      <div class="hero-buttons">${locked ? `<button class="button button-primary" data-action="open-access">У меня есть личная ссылка ${icon('arrow')}</button>` : `<a class="button button-primary" href="#participation">${member ? 'К моему конверту' : 'Заполнить мою карточку'} ${icon('arrow')}</a>`}</div>
+      <div class="hero-buttons">${locked ? `<button class="button button-primary" data-action="open-access">У меня есть личная ссылка ${icon('arrow')}</button>` : `<a class="button button-primary" href="${member && !member.ready ? '#participant-form' : '#participation'}">${member?.ready ? 'К моему конверту' : 'Заполнить мою карточку'} ${icon('arrow')}</a>`}</div>
     </div>
     <figure class="hero-visual">${locked ? placeholder() : '<img src="/api/photo" alt="Наша семья в новогоднем оформлении" fetchpriority="high" />'}<figcaption><span>Когда вся семья рядом</span><span>Ташкент · 2027</span></figcaption><span class="photo-star" aria-hidden="true">✧</span><div class="photo-badge" aria-hidden="true">С ЛЮБОВЬЮ<b>2027</b>ДЛЯ СВОИХ</div></figure>
   </section>
@@ -170,7 +171,7 @@ function hero() {
 
 function savedLink() {
   if (!personalLink) return '';
-  return `<aside class="notice save-link" role="status"><div class="save-icon">${icon('key')}</div><div class="save-content"><div class="save-title"><strong>${escape(personalLink.name ? `Личный доступ: ${personalLink.name}` : 'Сохраните личный доступ')}</strong><button class="icon-button" data-action="dismiss-link" aria-label="Скрыть напоминание">${icon('close')}</button></div><p>Сохраните эту ссылку, чтобы открыть карточку с другого телефона. Она даёт доступ к карточке и секретному получателю — отправляйте её только владельцу.</p><div class="button-stack"><button class="button button-secondary" data-action="copy-personal">${icon('copy')} Скопировать ссылку</button><button class="button button-quiet" data-action="download-personal">${icon('download')} Скачать ссылку</button></div></div></aside>`;
+  return `<aside class="notice save-link" role="status"><div class="save-icon">${icon('key')}</div><div class="save-content"><div class="save-title"><strong>${escape(personalLink.name ? `Личный доступ: ${personalLink.name}` : 'Сохраните личный доступ')}</strong><button class="icon-button" data-action="dismiss-link" aria-label="Скрыть напоминание">${icon('close')}</button></div><p>Сохраните эту ссылку, чтобы открыть карточку с другого телефона. Она даёт доступ к карточке и секретному получателю — отправляйте её только владельцу.</p><div class="button-stack"><button class="button button-secondary" data-action="share-personal">${icon('share')} Поделиться</button><button class="button button-secondary" data-action="copy-personal">${icon('copy')} Скопировать ссылку</button><button class="button button-quiet" data-action="download-personal">${icon('download')} Скачать ссылку</button></div></div></aside>`;
 }
 
 function steps() {
@@ -206,7 +207,7 @@ function fields(member, disabled) {
 function participantForm(member = null) {
   const allowed = state.game.registrationOpen || (Boolean(member) && state.game.editingOpen);
   const profile = member?.profile || state.profiles?.find(profile => profile.id === selectedProfileId);
-  return `<form id="participant-form"><div class="letter-header"><div><span class="letter-kicker">Семейная почта · Новый год 2027</span><h3 class="letter-title">Письмо моему Тайному Санте</h3></div><span class="letter-stamp" aria-hidden="true">✧<small>С ЛЮБОВЬЮ</small></span></div>${avatarPanel(profile)}<p class="letter-salutation">Дорогой Тайный Санта!</p>${fields(member, !allowed)}<p class="letter-signature">С теплом и в ожидании маленького чуда${profile ? `, ${escape(profile.name)}` : ''}.</p><p class="form-error" id="participant-error" role="alert"></p><div class="form-bottom"><p>${allowed ? 'Пожелания увидят ваш Санта и организатор.' : 'Сейчас изменение карточек закрыто. Обратитесь к организатору.'}</p><button class="button button-primary" type="submit" ${allowed ? '' : 'disabled'}>${member ? `${icon('check')} Сохранить изменения` : `Отправить моё письмо ${icon('arrow')}`}</button></div></form>`;
+  return `<form id="participant-form"><div class="letter-header"><div><span class="letter-kicker">Семейная почта · Новый год 2027</span><h3 class="letter-title">Письмо моему Тайному Санте</h3></div><span class="letter-stamp" aria-hidden="true">✧<small>С ЛЮБОВЬЮ</small></span></div>${avatarPanel(profile)}<p class="letter-salutation">Дорогой Тайный Санта!</p>${fields(member, !allowed)}<p class="letter-signature">С теплом и в ожидании маленького чуда${profile ? `, ${escape(profile.name)}` : ''}.</p><p class="form-error" id="participant-error" role="alert"></p><div class="form-bottom"><p>${allowed ? 'Пожелания увидят ваш Санта и организатор.' : 'Сейчас изменение карточек закрыто. Обратитесь к организатору.'}</p><button class="button button-primary" type="submit" ${allowed ? '' : 'disabled'}>${member?.ready ? `${icon('check')} Сохранить изменения` : `Отправить моё письмо ${icon('arrow')}`}</button></div></form>`;
 }
 
 function registration() {
@@ -220,11 +221,14 @@ function registration() {
 function envelopeCard() {
   const drawn = state.game.phase === 'drawn';
   const member = state.participant;
+  const needsCard = !member.ready && !drawn;
+  const canFillCard = state.game.registrationOpen || state.game.editingOpen;
   let title = 'Ваш секрет ещё впереди';
   let text = member.approved ? 'Организатор проведёт жеребьёвку, и здесь появится имя того, кому вы подарите немного радости.' : 'Ваша карточка сохранена. Организатор подтвердит участие, а затем проведёт жеребьёвку.';
-  if (drawn && state.recipient) { title = 'Кого вы порадуете?'; text = 'Ваш Санта хранит свой секрет. Пора узнать ваш.'; }
+  if (needsCard) { title = 'Напишите ваше письмо Санте'; text = canFillCard ? 'Личное приглашение готово. Заполните пожелания и отправьте письмо, чтобы ваша карточка была готова к жеребьёвке.' : 'Анкета ещё не заполнена, а изменение карточек закрыто. Обратитесь к организатору, чтобы заполнить пожелания.'; }
+  else if (drawn && state.recipient) { title = 'Кого вы порадуете?'; text = 'Ваш Санта хранит свой секрет. Пора узнать ваш.'; }
   else if (drawn) { title = 'Жеребьёвка уже прошла'; text = 'Для вашей карточки пока нет назначения. Обратитесь к организатору.'; }
-  return `<section class="gift-card ${opening ? 'is-opening' : ''}" aria-label="Ваш секретный получатель"><span class="eyebrow">${drawn && state.recipient ? 'Для вас есть особенное имя' : 'Здесь будет ваше назначение'}</span><span class="gift-star" aria-hidden="true">✧</span><span class="gift-star second" aria-hidden="true">✧</span><div class="envelope" aria-hidden="true"><div class="envelope-body"></div><div class="envelope-flap"></div><div class="envelope-seal">✧</div></div><h3>${title}</h3><p>${text}</p>${drawn && state.recipient ? `<button class="button button-primary" data-action="reveal" ${opening ? 'disabled' : ''}>${opening ? 'Открываем…' : 'Открыть мой конверт'} ${icon('arrow')}</button>` : ''}</section>`;
+  return `<section class="gift-card ${opening ? 'is-opening' : ''}" aria-label="${needsCard ? 'Заполнение вашей анкеты' : 'Ваш секретный получатель'}"><span class="eyebrow">${needsCard ? 'Осталось заполнить анкету' : drawn && state.recipient ? 'Для вас есть особенное имя' : 'Здесь будет ваше назначение'}</span><span class="gift-star" aria-hidden="true">✧</span><span class="gift-star second" aria-hidden="true">✧</span><div class="envelope" aria-hidden="true"><div class="envelope-body"></div><div class="envelope-flap"></div><div class="envelope-seal">✧</div></div><h3>${title}</h3><p>${text}</p>${needsCard && canFillCard ? `<a class="button button-primary" href="#participant-form">Заполнить пожелания ${icon('arrow')}</a>` : drawn && state.recipient ? `<button class="button button-primary" data-action="reveal" ${opening ? 'disabled' : ''}>${opening ? 'Открываем…' : 'Открыть мой конверт'} ${icon('arrow')}</button>` : ''}</section>`;
 }
 
 function recipientCard() {
@@ -234,12 +238,24 @@ function recipientCard() {
 
 function memberView() {
   const member = state.participant;
-  return `<section class="section" id="participation"><div class="member-heading"><div class="member-name"><div class="avatar" aria-hidden="true">${member.profile ? portrait(member.profile, "profile-avatar") : escape(initials(member.name))}</div><div><span class="eyebrow">Ваш уголок волшебства</span><h2>Привет, ${escape(member.name)}!</h2><div class="member-meta"><span class="status-pill ${member.approved ? '' : 'status-pending'}">${member.approved ? 'Участие подтверждено' : 'Ждём подтверждения'}</span><span>Карточка сохранена</span></div></div></div><button class="text-button" data-action="refresh">${icon('refresh')} Обновить</button></div>${savedLink()}<div class="member-grid"><div>${revealed && state.recipient ? recipientCard() : envelopeCard()}<p class="member-note"><strong>Один подарок — одному человеку.</strong> Каждый участник получает подарок от одного Санты. Имена получателей знает организатор.</p></div><div><details class="detail-editor" ${draft?.open ? 'open' : ''}><summary><div><h3>Мои пожелания</h3><p>${state.game.registrationOpen || state.game.editingOpen ? 'Посмотреть и изменить карточку' : 'Посмотреть сохранённую карточку'}</p></div></summary><div class="editor-body letter-card">${participantForm(member)}</div></details><p class="member-note">Вручение — <strong>1 января 2027 года</strong>.<br>Бюджет подарка — <strong>$50–100</strong>.</p></div></div></section>`;
+  return `<section class="section" id="participation"><div class="member-heading"><div class="member-name"><div class="avatar" aria-hidden="true">${member.profile ? portrait(member.profile, "profile-avatar") : escape(initials(member.name))}</div><div><span class="eyebrow">Ваш уголок волшебства</span><h2>Привет, ${escape(member.name)}!</h2><div class="member-meta"><span class="status-pill ${member.approved ? '' : 'status-pending'}">${member.approved ? 'Участие подтверждено' : 'Ждём подтверждения'}</span><span>${member.ready ? 'Карточка сохранена' : 'Анкета ещё не заполнена'}</span></div></div></div><button class="text-button" data-action="refresh">${icon('refresh')} Обновить</button></div>${savedLink()}<div class="member-grid"><div>${revealed && state.recipient ? recipientCard() : envelopeCard()}<p class="member-note"><strong>Один подарок — одному человеку.</strong> Каждый участник получает подарок от одного Санты. Имена получателей знает организатор.</p></div><div><details class="detail-editor" ${draft?.open || !member.ready ? 'open' : ''}><summary><div><h3>Мои пожелания</h3><p>${!member.ready ? (state.game.registrationOpen || state.game.editingOpen ? 'Заполните пожелания и отправьте письмо Санте' : 'Анкета не заполнена. Обратитесь к организатору') : state.game.registrationOpen || state.game.editingOpen ? 'Посмотреть и изменить карточку' : 'Посмотреть сохранённую карточку'}</p></div></summary><div class="editor-body letter-card">${participantForm(member)}</div></details><p class="member-note">Вручение — <strong>1 января 2027 года</strong>.<br>Бюджет подарка — <strong>$50–100</strong>.</p></div></div></section>`;
 }
 
 function participantRow(participant) {
   const drawn = state.game.phase === 'drawn';
-  return `<li class="participant-row"><div class="avatar" aria-hidden="true">${participant.profile ? portrait(participant.profile, "profile-avatar") : escape(initials(participant.name))}</div><div class="participant-details"><h3>${escape(participant.name)}${participant.id === state.participant?.id ? ' <span class="field-hint">(вы)</span>' : ''}</h3><div class="participant-badges"><span class="status-pill ${participant.approved ? '' : 'status-pending'}">${participant.approved ? 'Подтверждён' : 'На проверке'}</span><span class="status-pill ${participant.ready ? '' : 'status-pending'}">${participant.ready ? 'Карточка готова' : 'Ждём карточку'}</span></div><details class="participant-more"><summary>Пожелания участника</summary><p><strong>Хочет:</strong> ${escape(participant.wishes || 'Пока не указано')}</p>${participant.avoid ? `<p><strong>Не дарить:</strong> ${escape(participant.avoid)}</p>` : ''}${participant.links?.map((url, index) => safeLink(url) ? `<p><a href="${escape(safeLink(url))}" target="_blank" rel="noopener noreferrer">Идея подарка ${index + 1} ↗</a></p>` : '').join('') || ''}</details></div><div class="participant-actions">${!drawn && !participant.approved ? `<button class="button button-secondary" data-action="approve" data-id="${escape(participant.id)}">Подтвердить</button>` : ''}<button class="icon-button" data-action="rotate-personal" data-id="${escape(participant.id)}" title="Выдать новую личную ссылку" aria-label="Выдать новую личную ссылку: ${escape(participant.name)}">${icon('key')}</button>${!drawn ? `<button class="icon-button danger" data-action="remove" data-id="${escape(participant.id)}" title="Удалить участника" aria-label="Удалить участника: ${escape(participant.name)}">${icon('trash')}</button>` : ''}</div></li>`;
+  return `<li class="participant-row"><div class="avatar" aria-hidden="true">${participant.profile ? portrait(participant.profile, "profile-avatar") : escape(initials(participant.name))}</div><div class="participant-details"><h3>${escape(participant.name)}${participant.id === state.participant?.id ? ' <span class="field-hint">(вы)</span>' : ''}</h3><div class="participant-badges"><span class="status-pill ${participant.approved ? '' : 'status-pending'}">${participant.approved ? 'Подтверждён' : 'На проверке'}</span><span class="status-pill ${participant.ready ? '' : 'status-pending'}">${participant.ready ? 'Карточка готова' : 'Ждём карточку'}</span></div><details class="participant-more"><summary>Пожелания участника</summary><p><strong>Хочет:</strong> ${escape(participant.wishes || 'Пока не указано')}</p>${participant.avoid ? `<p><strong>Не дарить:</strong> ${escape(participant.avoid)}</p>` : ''}${participant.links?.map((url, index) => safeLink(url) ? `<p><a href="${escape(safeLink(url))}" target="_blank" rel="noopener noreferrer">Идея подарка ${index + 1} ↗</a></p>` : '').join('') || ''}</details></div><div class="participant-actions">${!drawn && !participant.approved ? `<button class="button button-secondary" data-action="approve" data-id="${escape(participant.id)}">Подтвердить</button>` : ''}<button class="button button-secondary button-small new-personal-link" data-action="rotate-personal" data-id="${escape(participant.id)}" title="Выдать новую личную ссылку" aria-label="Выдать новую личную ссылку: ${escape(participant.name)}">${icon('key')}<span>Новая ссылка</span></button>${!drawn ? `<button class="icon-button danger" data-action="remove" data-id="${escape(participant.id)}" title="Удалить участника" aria-label="Удалить участника: ${escape(participant.name)}">${icon('trash')}</button>` : ''}</div></li>`;
+}
+
+function personalInvitations() {
+  if (state.access !== 'organizer' || !state.profiles?.length) return '';
+  const drawn = state.game.phase === 'drawn';
+  return `<section class="card personal-invitations" id="personal-invitations" aria-labelledby="personal-invitations-title">
+    <div class="card-topline"><h2 id="personal-invitations-title">Личные приглашения</h2><span class="eyebrow">Каждому — своё письмо</span></div>
+    <p class="card-description">Создайте отдельную ссылку и отправьте её участнику лично. По ней сразу откроется его анкета с мультяшным портретом, без выбора имени.</p>
+    ${drawn ? '<div class="notice invitation-freeze"><strong>Состав игры зафиксирован</strong>Жеребьёвка уже проведена. Чтобы пригласить новых участников, сначала отмените её. Новую ссылку для действующего участника можно выдать в списке «Наша семья».</div>' : ''}
+    <ul class="personal-invitation-grid">${state.profiles.map(profile => `<li class="personal-invitation ${profile.claimed ? 'invitation-prepared' : ''}"><div class="invitation-person"><div class="avatar" aria-hidden="true">${portrait(profile)}</div><h3 class="invitation-name">${escape(profile.name)}</h3></div>${profile.claimed ? '<span class="invitation-status">Приглашение подготовлено</span>' : drawn ? '<span class="invitation-caption">Не участвует в текущей игре</span>' : `<button class="button button-secondary button-small" type="button" data-action="invite-profile" data-profile="${escape(profile.id)}" aria-label="Создать личную ссылку: ${escape(profile.name)}">${icon('key')} Создать личную ссылку</button>`}</li>`).join('')}</ul>
+    <p class="admin-footnote">Личные ссылки видны только в момент создания. Если ссылка потерялась, нажмите «Новая ссылка» рядом с участником в списке «Наша семья». Предыдущая ссылка перестанет работать.</p>
+  </section>`;
 }
 
 function adminView() {
@@ -249,7 +265,7 @@ function adminView() {
   const drawn = state.game.phase === 'drawn';
   const canDraw = people.length >= 2 && approved === people.length && ready === people.length;
   const cutoffPassed = Date.now() >= Date.parse(state.game.deadline);
-  return `<section class="admin-intro"><span class="eyebrow">Всё для семейного праздника</span><h1>Кабинет организатора</h1><p>Приглашайте близких, проверяйте карточки и запускайте новогоднее волшебство.</p></section>${savedLink()}<div class="admin-stats"><div class="stat"><strong>${people.length}</strong><span>участников<br>в семейной игре</span></div><div class="stat"><strong>${approved}</strong><span>участие<br>подтверждено</span></div><div class="stat"><strong>${ready}</strong><span>карточек<br>готово к жеребьёвке</span></div></div><div class="admin-layout"><section class="card admin-card"><div class="card-topline"><h2>Наша семья</h2><button class="text-button" data-action="refresh" aria-label="Обновить список участников">${icon('refresh')} Обновить</button></div>${people.length ? `<ul class="participant-list">${people.map(participantRow).join('')}</ul>` : '<div class="empty-state"><span class="empty-icon" aria-hidden="true">✧</span>Здесь пока тихо.<br>Отправьте общую ссылку в семейную группу.</div>'}${!drawn ? '<details class="add-person"><summary>＋ Добавить участника вручную</summary><form id="add-person-form"><label class="sr-only" for="add-name">Имя участника</label><input id="add-name" name="name" maxlength="60" placeholder="Имя участника" required /><button class="button button-primary button-small" type="submit">Добавить</button><p class="form-error" id="add-person-error" role="alert"></p></form><p class="field-hint">После добавления передайте человеку личную ссылку для заполнения карточки.</p></details>' : '<p class="admin-footnote">Чтобы изменить состав участников, сначала отмените жеребьёвку.</p>'}</section><aside class="admin-side"><section class="card"><span class="eyebrow">Вся семья по одной ссылке</span><h3 class="invite-heading">Пригласим близких</h3><p class="card-description">Отправьте общее приглашение в семейную группу. Каждый заполнит свою карточку и получит личный доступ.</p><button class="button button-secondary button-full" data-action="copy-invitation">${icon('copy')} Скопировать приглашение</button><p class="admin-footnote">Не отправляйте в группу ссылку организатора или чью-либо личную ссылку.</p></section><section class="card"><div class="card-topline"><h3 class="game-heading">Ход игры</h3><span class="status-pill ${drawn ? '' : state.game.registrationOpen ? '' : 'status-closed'}">${drawn ? 'Имена назначены' : state.game.registrationOpen ? 'Приём открыт' : 'Приём закрыт'}</span></div>${drawn ? '<p class="card-description">Конверты готовы. Участники уже могут открыть своих получателей.</p>' : `<p class="card-description">Для жеребьёвки нужны хотя бы два участника. Подтвердите всех и дождитесь готовых карточек.</p><button class="button button-primary button-full" data-action="draw" ${canDraw ? '' : 'disabled'}>${icon('gift')} Провести жеребьёвку</button>${!canDraw ? `<p class="admin-footnote">${people.length < 2 ? 'Пригласите ещё участников.' : `${people.length - approved ? `Ожидают подтверждения: ${people.length - approved}. ` : ''}${people.length - ready ? `Не заполнили карточку: ${people.length - ready}.` : ''}`}</p>` : ''}`}<div class="action-group"><h4>Приём новых карточек</h4><p>До 25 декабря включительно, по времени Ташкента. Приём можно закончить раньше.</p>${!drawn ? `<button class="button button-quiet button-full" data-action="${state.game.registrationOpen ? 'close-registration' : 'open-registration'}" ${!state.game.registrationOpen && cutoffPassed ? 'disabled' : ''}>${state.game.registrationOpen ? 'Закрыть приём карточек' : cutoffPassed ? 'Срок приёма завершён' : 'Открыть приём карточек'}</button>` : '<p>Завершён после жеребьёвки.</p>'}</div><div class="action-group"><label class="toggle-label"><input id="editing-toggle" type="checkbox" data-action="set-editing" ${state.game.editingOpen ? 'checked' : ''} /><span>Разрешить менять пожелания после закрытия приёма</span></label></div>${drawn ? '<div class="action-group"><h4>Изменить состав или назначения</h4><p>Отмена аннулирует все выданные конверты. После изменений потребуется новая жеребьёвка.</p><button class="button button-quiet button-full" data-action="reset">Отменить жеребьёвку</button></div>' : ''}</section></aside></div>${drawn ? `<section class="section assignments-section"><div class="section-intro"><div><span class="eyebrow">Только для организатора</span><h2>Кто кого порадует</h2><p>Каждый дарит один подарок и получает один подарок.</p></div></div>${state.admin.assignments.length ? `<div class="table-wrap"><table><thead><tr><th scope="col">Тайный Санта</th><th aria-label="дарит" class="arrow-cell">→</th><th scope="col">Получатель</th></tr></thead><tbody>${state.admin.assignments.map(pair => `<tr><td>${escape(pair.giverName)}</td><td class="arrow-cell" aria-hidden="true">→</td><td>${escape(pair.recipientName)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="admin-info">Назначения пока не появились. Обновите страницу.</p>'}</section>` : '<div class="section"></div>'}`;
+  return `<section class="admin-intro"><span class="eyebrow">Всё для семейного праздника</span><h1>Кабинет организатора</h1><p>Приглашайте близких, проверяйте карточки и запускайте новогоднее волшебство.</p></section>${savedLink()}<div class="admin-stats"><div class="stat"><strong>${people.length}</strong><span>участников<br>в семейной игре</span></div><div class="stat"><strong>${approved}</strong><span>участие<br>подтверждено</span></div><div class="stat"><strong>${ready}</strong><span>карточек<br>готово к жеребьёвке</span></div></div>${personalInvitations()}<div class="admin-layout"><section class="card admin-card"><div class="card-topline"><h2>Наша семья</h2><button class="text-button" data-action="refresh" aria-label="Обновить список участников">${icon('refresh')} Обновить</button></div>${people.length ? `<ul class="participant-list">${people.map(participantRow).join('')}</ul>` : '<div class="empty-state"><span class="empty-icon" aria-hidden="true">✧</span>Здесь пока тихо.<br>Отправьте общую ссылку в семейную группу.</div>'}${!drawn ? '<details class="add-person"><summary>＋ Добавить участника вручную</summary><form id="add-person-form"><label class="sr-only" for="add-name">Имя участника</label><input id="add-name" name="name" maxlength="60" placeholder="Имя участника" required /><button class="button button-primary button-small" type="submit">Добавить</button><p class="form-error" id="add-person-error" role="alert"></p></form><p class="field-hint">После добавления передайте человеку личную ссылку для заполнения карточки.</p></details>' : '<p class="admin-footnote">Чтобы изменить состав участников, сначала отмените жеребьёвку.</p>'}</section><aside class="admin-side"><section class="card"><span class="eyebrow">Вся семья по одной ссылке</span><h3 class="invite-heading">Пригласим близких</h3><p class="card-description">Отправьте общее приглашение в семейную группу. Каждый заполнит свою карточку и получит личный доступ.</p><button class="button button-secondary button-full" data-action="copy-invitation">${icon('copy')} Скопировать приглашение</button><p class="admin-footnote">Не отправляйте в группу ссылку организатора или чью-либо личную ссылку.</p></section><section class="card"><div class="card-topline"><h3 class="game-heading">Ход игры</h3><span class="status-pill ${drawn ? '' : state.game.registrationOpen ? '' : 'status-closed'}">${drawn ? 'Имена назначены' : state.game.registrationOpen ? 'Приём открыт' : 'Приём закрыт'}</span></div>${drawn ? '<p class="card-description">Конверты готовы. Участники уже могут открыть своих получателей.</p>' : `<p class="card-description">Для жеребьёвки нужны хотя бы два участника. Подтвердите всех и дождитесь готовых карточек.</p><button class="button button-primary button-full" data-action="draw" ${canDraw ? '' : 'disabled'}>${icon('gift')} Провести жеребьёвку</button>${!canDraw ? `<p class="admin-footnote">${people.length < 2 ? 'Пригласите ещё участников.' : `${people.length - approved ? `Ожидают подтверждения: ${people.length - approved}. ` : ''}${people.length - ready ? `Не заполнили карточку: ${people.length - ready}.` : ''}`}</p>` : ''}`}<div class="action-group"><h4>Приём новых карточек</h4><p>До 25 декабря включительно, по времени Ташкента. Приём можно закончить раньше.</p>${!drawn ? `<button class="button button-quiet button-full" data-action="${state.game.registrationOpen ? 'close-registration' : 'open-registration'}" ${!state.game.registrationOpen && cutoffPassed ? 'disabled' : ''}>${state.game.registrationOpen ? 'Закрыть приём карточек' : cutoffPassed ? 'Срок приёма завершён' : 'Открыть приём карточек'}</button>` : '<p>Завершён после жеребьёвки.</p>'}</div><div class="action-group"><label class="toggle-label"><input id="editing-toggle" type="checkbox" data-action="set-editing" ${state.game.editingOpen ? 'checked' : ''} /><span>Разрешить менять пожелания после закрытия приёма</span></label></div>${drawn ? '<div class="action-group"><h4>Изменить состав или назначения</h4><p>Отмена аннулирует все выданные конверты. После изменений потребуется новая жеребьёвка.</p><button class="button button-quiet button-full" data-action="reset">Отменить жеребьёвку</button></div>' : ''}</section></aside></div>${drawn ? `<section class="section assignments-section"><div class="section-intro"><div><span class="eyebrow">Только для организатора</span><h2>Кто кого порадует</h2><p>Каждый дарит один подарок и получает один подарок.</p></div></div>${state.admin.assignments.length ? `<div class="table-wrap"><table><thead><tr><th scope="col">Тайный Санта</th><th aria-label="дарит" class="arrow-cell">→</th><th scope="col">Получатель</th></tr></thead><tbody>${state.admin.assignments.map(pair => `<tr><td>${escape(pair.giverName)}</td><td class="arrow-cell" aria-hidden="true">→</td><td>${escape(pair.recipientName)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="admin-info">Назначения пока не появились. Обновите страницу.</p>'}</section>` : '<div class="section"></div>'}`;
 }
 
 function renderNavigation() {
@@ -278,6 +294,23 @@ async function copy(value, success) {
     if (!copied) throw new Error('Браузер не разрешил копирование. Скачайте личную ссылку файлом.');
   }
   notify(success);
+}
+
+async function sharePersonal() {
+  if (!personalLink?.url) throw new Error('Ссылка пока недоступна. Создайте личное приглашение или выдайте новую ссылку.');
+  if (typeof navigator.share === 'function') {
+    try {
+      await navigator.share({
+        title: 'Семейный Тайный Санта — 2027',
+        text: `${personalLink.name ? `${personalLink.name}, это` : 'Это'} ваше личное письмо Тайному Санте. Заполните пожелания до 25 декабря и сохраните ссылку: позже здесь появится ваш секретный получатель.`,
+        url: personalLink.url,
+      });
+      return;
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+    }
+  }
+  await copy(personalLink.url, 'Личная ссылка скопирована. Отправьте её только владельцу карточки.');
 }
 
 function downloadPersonal() {
@@ -351,9 +384,23 @@ document.addEventListener('click', async event => {
     return;
   }
   if (action === 'download-personal') { downloadPersonal(); return; }
+  if (action === 'share-personal') { await task(button, sharePersonal); return; }
   if (action === 'copy-personal') { await task(button, () => copy(personalLink?.url, 'Личная ссылка скопирована. Сохраните её в надёжном месте.')); return; }
   if (action === 'copy-invitation') { await task(button, () => copy(state.admin.invitationUrl, 'Общее приглашение скопировано. Отправьте его в семейную группу.')); return; }
   if (action === 'refresh') { await task(button, async () => { await refresh(); notify('Всё актуально.'); }); return; }
+  if (action === 'invite-profile') {
+    if (state.access !== 'organizer' || state.game.phase === 'drawn') return;
+    const profile = state.profiles?.find(profile => profile.id === button.dataset.profile && !profile.claimed);
+    if (!profile) return;
+    await task(button, async () => {
+      const data = await post('/api/admin/participants', { profileId: profile.id, wishes: '', avoid: '', links: [], ready: false });
+      if (data.personalUrl) personalLink = { name: profile.name, url: data.personalUrl };
+      await refresh();
+      document.querySelector('.save-link')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      notify('Личное приглашение готово. Отправьте ссылку только этому участнику.');
+    });
+    return;
+  }
   if (action === 'reveal') {
     opening = true;
     captureDraft();
@@ -444,6 +491,9 @@ document.addEventListener('submit', async event => {
       form.reset();
       document.querySelector('#access-dialog').close();
       await refresh();
+      if (type === 'personal' && state.participant && !state.participant.ready) {
+        document.querySelector('.detail-editor')?.scrollIntoView({ block: 'start', behavior: 'instant' });
+      }
       notify('Добро пожаловать в семейный круг!');
     }, error);
   } else {
@@ -471,7 +521,12 @@ async function start() {
       if (type === 'admin') activeTab = 'admin';
     } catch (error) { initialError = error.message; }
   }
-  try { await refresh(); }
+  try {
+    await refresh();
+    if (type === 'personal' && state.participant && !state.participant.ready) {
+      document.querySelector('.detail-editor')?.scrollIntoView({ block: 'start', behavior: 'instant' });
+    }
+  }
   catch (error) {
     main.innerHTML = `<section class="error-screen"><span class="eyebrow">Небольшая пауза</span><h1>Не удалось открыть праздник</h1><p>${escape(error instanceof TypeError ? 'Проверьте подключение к интернету и попробуйте снова.' : error.message)}</p><button class="button button-primary" id="retry-loading">Попробовать снова ${icon('refresh')}</button></section>`;
     document.querySelector('#retry-loading').addEventListener('click', start, { once: true });
