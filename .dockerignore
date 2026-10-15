@@ -1,0 +1,16 @@
+.git
+.gitignore
+node_modules
+data
+.env
+.env.*
+**/access.json
+**/*.sqlite
+**/*.sqlite-*
+**/*.db
+**/*.db-*
+**/family-portrait.*
+coverage
+.sites-runtime
+.wrangler
+*.log

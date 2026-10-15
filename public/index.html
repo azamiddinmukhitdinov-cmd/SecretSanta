@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#173d31" />
+    <meta name="robots" content="noindex, nofollow, noarchive" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="description" content="Семейный Тайный Санта — 2027. Немного волшебства для самых близких." />
+    <title>Семейный Тайный Санта — 2027</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23173d31'/%3E%3Cpath d='M32 10 16 34h10L13 48h38L38 34h10L32 10Z' fill='%23dfc18b'/%3E%3Cpath d='M32 46v9' stroke='%23dfc18b' stroke-width='4'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Перейти к содержимому</a>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Семейный Тайный Санта — главная">
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 44" fill="none"><path d="M20 3 7 22h8L4 34h32L25 22h8L20 3Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M20 34v7M20 0v6M17 3h6" stroke="currentColor" stroke-width="1.5"/></svg></span>
+        <span>ТАЙНЫЙ САНТА<small>семья · 2027</small></span>
+      </a>
+      <nav id="navigation" class="navigation" aria-label="Основная навигация"></nav>
+    </header>
+    <main id="main" tabindex="-1">
+      <div class="initial-loading"><span class="loading-star" aria-hidden="true">✧</span><p>Собираем немного волшебства…</p></div>
+    </main>
+    <footer class="site-footer">
+      <span class="footer-star" aria-hidden="true">✧</span>
+      <p>Самые хорошие подарки — от самых близких.</p>
+      <span>Семейный Тайный Санта · 2027</span>
+    </footer>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <dialog id="confirm-dialog" class="modal">
+      <form method="dialog">
+        <span class="eyebrow">Семейный Тайный Санта</span>
+        <h2 id="confirm-title"></h2>
+        <p id="confirm-message"></p>
+        <div class="modal-actions"><button class="button button-quiet" value="cancel">Отмена</button><button id="confirm-accept" class="button button-primary" value="confirm">Подтвердить</button></div>
+      </form>
+    </dialog>
+    <dialog id="access-dialog" class="modal">
+      <button class="icon-button modal-close" type="button" data-action="close-access" aria-label="Закрыть">×</button>
+      <span class="eyebrow">С возвращением</span>
+      <h2>Ваш маленький секрет</h2>
+      <p>Вставьте приглашение или личную ссылку, которую вы сохранили раньше.</p>
+      <form id="access-form">
+        <label for="access-url">Ссылка для входа</label>
+        <input id="access-url" name="url" type="text" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Вставьте ссылку целиком" required />
+        <p class="form-error" id="access-error" role="alert"></p>
+        <button class="button button-primary button-full" type="submit">Открыть</button>
+      </form>
+    </dialog>
+    <noscript><p class="noscript">Для участия включите JavaScript в настройках браузера.</p></noscript>
+  </body>
+</html>

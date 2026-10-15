@@ -1,0 +1,15 @@
+{
+  "name": "family-secret-santa",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Семейный Тайный Санта — 2027",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test",
+    "access": "node scripts/access.mjs"
+  }
+}
