@@ -52,3 +52,20 @@ test('mail requires consent and verified addresses, keeps Santa secret, retries 
   await mail.flush(); assert.equal(messages.length, 5, 'Opt-out stops future email');
   assert.ok(!Object.hasOwn(store.recipient(b.participant.id), 'email'));
 });
+
+test('Mail.ru addresses select the correct SMTP server and show their own authentication error', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'santa-mail-provider-test-'));
+  const store = createStore(root);
+  let options, code = 'EAUTH', mail;
+  t.after(async () => { await mail?.close(); store.close(); await rm(root, { recursive: true, force: true }); });
+  mail = await createMail(store, { appUrl: 'https://example.invalid', transportFactory: config => {
+    options = config;
+    return { verify: async () => { throw Object.assign(new Error('Synthetic failure'), { code }); }, close() {} };
+  } });
+  const input = { provider: 'gmail', from: 'sender@mail.ru', password: 'synthetic-password' };
+  await assert.rejects(() => mail.save(input), error => error.status === 400 && error.message.includes('Mail.ru отклонил вход') && !error.message.includes('Gmail'));
+  assert.equal(options.host, 'smtp.mail.ru');
+  assert.equal(mail.status().configured, false);
+  code = 'ETIMEDOUT';
+  await assert.rejects(() => mail.save(input), error => error.message.includes('Не удалось связаться') && !error.message.includes('пароль'));
+});

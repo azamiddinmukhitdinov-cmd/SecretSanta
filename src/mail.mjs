@@ -20,14 +20,25 @@ export async function createMail(store, { appUrl, clock = () => new Date(), tran
   }
   const status = () => ({ configured: Boolean(transport), configurationError, provider: config?.provider || 'gmail', from: config?.from || '' });
   const save = async input => {
-    const provider = input.provider, from = typeof input.from === 'string' ? input.from.trim().toLowerCase() : '';
+    const from = typeof input.from === 'string' ? input.from.trim().toLowerCase() : '';
+    const domain = from.split('@')[1];
+    const provider = ({ 'mail.ru': 'mailru', 'gmail.com': 'gmail', 'yandex.ru': 'yandex' })[domain] || input.provider;
     if (!Object.hasOwn(hosts, provider) || !/^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(from) || from.length > 254) throw new AppError(400, 'Выберите почтовый сервис и укажите адрес отправителя.');
     let password = input.password || (config?.provider === provider && config?.from === from ? config.password : '');
     if (provider === 'gmail' && typeof password === 'string') password = password.replace(/\s/g, '');
     if (typeof password !== 'string' || password.length < 8 || password.length > 200 || /[\r\n]/.test(password)) throw new AppError(400, 'Введите пароль приложения от почтового сервиса.');
     const next = { provider, from, password }, candidate = makeTransport(next);
     try { await candidate.verify(); }
-    catch { candidate.close(); throw new AppError(400, 'Не удалось подключить почту. Проверьте адрес и пароль приложения; для Gmail нужна двухэтапная аутентификация.'); }
+    catch (error) {
+      candidate.close();
+      if (error.code !== 'EAUTH') throw new AppError(400, 'Не удалось связаться с почтовым сервером. Попробуйте позже; сохранённое подключение не изменилось.');
+      const hints = {
+        gmail: 'Gmail отклонил вход. Нужен пароль приложения Google, созданный после включения двухэтапной аутентификации.',
+        mailru: 'Mail.ru отклонил вход. Создайте пароль для внешнего приложения в настройках безопасности Mail.ru и введите его вместо обычного пароля от ящика.',
+        yandex: 'Яндекс отклонил вход. Проверьте адрес и пароль приложения для почты в настройках Яндекс ID.',
+      };
+      throw new AppError(400, hints[provider]);
+    }
     const temporary = `${path}.${randomUUID()}.tmp`;
     await writeFile(temporary, JSON.stringify(next, null, 2), { mode: 0o600 });
     await rename(temporary, path);
