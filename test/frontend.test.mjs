@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 // A DOM stub checks client rendering and handlers without changing the live game.
-function client({ storage = new Map(), storageFails = false, onRequest, search = '' } = {}) {
+function client({ storage = new Map(), storageFails = false, onRequest, search = '', reducedMotion = false } = {}) {
   const handlers = {};
   const elements = new Map();
   const element = () => ({ innerHTML: '', textContent: '', open: false, showModal() { this.open = true; }, close() { this.open = false; }, classList: { toggle() {}, add() {}, remove() {} }, querySelector() { return null; } });
@@ -14,7 +14,7 @@ function client({ storage = new Map(), storageFails = false, onRequest, search =
   let now = Date.parse('2026-12-31T18:59:00Z');
   const context = vm.createContext({
     document: { querySelector: id => elements.get(id) || null, querySelectorAll: () => [], body: element(), addEventListener: (type, handler) => { handlers[type] = handler; } },
-    window: { addEventListener() {}, matchMedia: () => ({ matches: false }) },
+    window: { addEventListener() {}, matchMedia: () => ({ matches: reducedMotion }) },
     localStorage: { getItem(key) { return storage.get(key) || null; }, setItem(key, value) { if (storageFails) throw new Error('Storage disabled'); storage.set(key, value); }, removeItem(key) { storage.delete(key); } },
     FormData: class { constructor(form) { this.values = form.values; } get(key) { return this.values[key] ?? null; } },
     setTimeout: () => 1, clearTimeout() {}, setInterval() {},
@@ -256,4 +256,22 @@ test('November draw does not require finished wishes and recipient view explains
   const invitation = c.api.invitationMessage({ name: 'А', personalUrl: 'https://example.invalid/#personal=TEST' });
   assert.ok(invitation.includes('22 ноября') && invitation.includes('6 декабря'));
   assert.ok(!invitation.includes('25 декабря'));
+});
+
+test('sleigh interaction flies on request and motion controls stop it', async () => {
+  for (const reducedMotion of [false, true]) {
+    const c = client({ reducedMotion });
+    const classes = new Set();
+    const flight = { hidden: true, offsetWidth: 230, classList: { add(value) { classes.add(value); }, remove(value) { classes.delete(value); } } };
+    c.elements.set('#santa-flight', flight);
+    const button = { dataset: { action: 'santa-ride' }, disabled: false, getAttribute() { return null; }, matches() { return false; } };
+    await c.handlers.click({ target: { closest: () => button } });
+    assert.equal(flight.hidden, reducedMotion);
+    assert.equal(classes.has('is-flying'), !reducedMotion);
+    assert.ok(c.elements.get('#toast').textContent.includes('Дед Мороз уже в пути'));
+    button.dataset.action = 'toggle-motion';
+    await c.handlers.click({ target: { closest: () => button } });
+    assert.equal(flight.hidden, true);
+    assert.equal(classes.has('is-flying'), false);
+  }
 });

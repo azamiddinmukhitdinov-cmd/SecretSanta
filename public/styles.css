@@ -697,3 +697,87 @@ html:has(body.motion-paused) { scroll-behavior: auto; }
   .stamp-just-sent { animation: none; }
   .portrait-hotspot ellipse, .hotspot-name { transition: none; }
 }
+
+/* A tiny sleigh ride, glowing ornaments and letters from the Christmas post. */
+.holiday-art { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+.brand-holiday { gap: 13px; }
+.brand-title { color: inherit; text-decoration: none; white-space: nowrap; }
+.santa-launch { position: relative; width: 116px; height: 69px; padding: 0; border: 0; background: transparent; color: #ffe4a1; cursor: pointer; flex: none; filter: drop-shadow(0 4px 9px #061b2b55); }
+.santa-sleigh { display: block; width: 100%; height: 100%; overflow: visible; animation: sleigh-bob 5s ease-in-out infinite; }
+.santa-launch:hover .santa-sleigh, .santa-launch:focus-visible .santa-sleigh { animation: sleigh-bob 1.5s ease-in-out infinite; filter: drop-shadow(0 0 8px #efd28c70); }
+.santa-launch:hover .santa-wave, .santa-launch:focus-visible .santa-wave { transform-box: fill-box; transform-origin: bottom left; animation: santa-wave .8s ease-in-out 3; }
+.santa-launch:focus-visible, .brand-title:focus-visible { outline: 2px solid #efd28c; outline-offset: 5px; border-radius: 10px; }
+.santa-hint { position: absolute; left: 50%; bottom: -14px; transform: translateX(-50%); white-space: nowrap; font-size: 9px; font-weight: 400; letter-spacing: .03em; opacity: 0; transition: opacity .2s; }
+.santa-launch:hover .santa-hint, .santa-launch:focus-visible .santa-hint { opacity: 1; }
+.santa-flight { position: fixed; left: -250px; top: 115px; width: 230px; z-index: 70; pointer-events: none; filter: drop-shadow(0 8px 12px #04132250); }
+.santa-flight[hidden] { display: none; }
+.santa-flight svg { display: block; width: 100%; overflow: visible; }
+.santa-flight.is-flying { animation: santa-sky-ride 5s cubic-bezier(.3,.05,.75,1) both; }
+.santa-trail { position: absolute; right: 83%; top: 70%; width: 130px; color: #ffe1a3; letter-spacing: 12px; font-size: 20px; text-shadow: 0 0 12px #ffdc83; }
+@keyframes sleigh-bob { 0%,100% { transform: translateY(1px) rotate(-2deg); } 50% { transform: translateY(-4px) rotate(1deg); } }
+@keyframes santa-wave { 50% { transform: rotate(17deg); } }
+@keyframes santa-sky-ride { 0% { transform: translate(0,35px) rotate(-6deg); } 40% { transform: translate(45vw,-35px) rotate(0); } 100% { transform: translate(calc(100vw + 520px),-80px) rotate(-8deg); } }
+.hero-visual figcaption span.family-photo-label { font: italic 21px/1 var(--serif); text-transform: none; letter-spacing: .02em; color: #8f6639; }
+.holiday-occasions { padding: 38px 24px 30px; border: 1px solid #dac599; background: radial-gradient(ellipse at 50% 0, #fff4d5 0, transparent 70%), linear-gradient(125deg,#fffaf0,#f1f5e8); box-shadow: 0 10px 35px #061b3e30, inset 0 0 0 5px #ffffff75; }
+.holiday-occasions::before { content: ''; position: absolute; top: 0; left: 7%; right: 7%; height: 12px; border-bottom: 1px solid #a6b596; border-radius: 0 0 50% 50%; background: radial-gradient(circle at 8% 70%,#bc5355 0 3px,transparent 4px), radial-gradient(circle at 27% 85%,#d6ae58 0 3px,transparent 4px), radial-gradient(circle at 48% 95%,#62896d 0 3px,transparent 4px), radial-gradient(circle at 70% 85%,#b9575e 0 3px,transparent 4px), radial-gradient(circle at 91% 70%,#d6ae58 0 3px,transparent 4px); }
+.holiday-occasions .occasion { padding: 0 15px; gap: 14px; border-color: #d9ccb2; }
+.occasion-bauble { display: grid; place-items: center; position: relative; width: 49px; height: 49px; border-radius: 50%; flex: none; color: #a53945; background: radial-gradient(circle at 30% 24%,#fff7e7,#f4d8c9 72%); border: 1px solid #c69c70; box-shadow: inset -3px -4px 8px #8f51441c, 0 0 13px #b65d4330; animation: ornament-glow 6s ease-in-out infinite; transition: transform .25s; }
+.occasion-bauble::before { content: ''; position: absolute; width: 12px; height: 6px; top: -5px; left: calc(50% - 6px); border-radius: 3px 3px 0 0; background: #b38b4c; border: 1px solid #e5c98d; }
+.occasion-bauble::after { content: ''; position: absolute; width: 8px; height: 8px; top: -13px; left: calc(50% - 4px); border: 1px solid #ad8b54; border-radius: 50%; }
+.occasion:nth-child(2) .occasion-bauble { animation-delay: -1.5s; }
+.occasion:nth-child(3) .occasion-bauble { animation-delay: -3s; }
+.occasion:nth-child(4) .occasion-bauble { animation-delay: -4.5s; }
+.holiday-occasions .occasion-icon { width: 25px; height: 25px; padding: 0; margin: 0; border: 0; border-radius: 0; background: transparent; color: inherit; stroke-width: 1.6; }
+.holiday-occasions .occasion-label { font-size: 9px; letter-spacing: .055em; margin-bottom: 4px; }
+.holiday-occasions .occasion strong { font-family: var(--serif); font-size: 17px; color: #354e3c; }
+.holiday-occasions .occasion:hover .occasion-bauble { transform: rotate(-9deg) translateY(-2px); }
+@keyframes ornament-glow { 0%,100% { color:#ad3949; box-shadow: inset -3px -4px 8px #8f51441c,0 0 16px #cc53614d; } 25% { color:#a17a20; box-shadow: inset -3px -4px 8px #8f51441c,0 0 21px #e8bf5b80; } 50% { color:#31775b; box-shadow: inset -3px -4px 8px #8f51441c,0 0 18px #4aab8463; } 75% { color:#4b71a0; box-shadow: inset -3px -4px 8px #8f51441c,0 0 21px #6d9cda70; } }
+.christmas-guide { margin: 48px 0 56px; }
+.guide-heading { text-align: center; margin-bottom: 27px; }
+.guide-heading .eyebrow { color: #e7c993; }
+.guide-heading h2 { font: 35px/1.2 var(--serif); color: #fff1d8; margin: 10px 0; letter-spacing: -.02em; }
+.guide-heading > p { color: #c2d5d8; font-size: 13px; }
+.christmas-steps { gap: 21px; margin: 0; }
+.christmas-steps .christmas-step { display: flex; flex-direction: column; padding: 30px 28px 26px; border: 1px solid #d9c297; border-radius: 19px; background: radial-gradient(ellipse at 95% 0,#ead8b470,transparent 54%),linear-gradient(145deg,#fffaf0,#f3eedf); box-shadow: 0 10px 28px #061b3e36, inset 0 0 0 5px #ffffff70; overflow: hidden; transition: transform .25s,border-color .25s; }
+.christmas-step::before { content: ''; position: absolute; width: 77px; height: 77px; right: -18px; top: -21px; border: 9px double #678162; border-radius: 50%; opacity: .65; transform: rotate(25deg); }
+.christmas-step::after { content: '✦'; position: absolute; right: 25px; top: 28px; color: #b6434b; font-size: 19px; }
+.christmas-step:nth-child(2) { background: radial-gradient(ellipse at 95% 0,#b3cfb54d,transparent 54%),linear-gradient(145deg,#fcfbef,#eaf1e3); }
+.christmas-step:nth-child(3) { background: radial-gradient(ellipse at 95% 0,#e4bdb64d,transparent 54%),linear-gradient(145deg,#fff9ec,#f5e8df); }
+.christmas-step:hover { transform: translateY(-5px); border-color: #e7ca8f; }
+.step-decoration { display: flex; align-items: center; gap: 13px; margin-bottom: 23px; }
+.step-symbol { width: 42px; height: 42px; padding: 9px; border: 1px solid #d5bb86; border-radius: 12px; color: #ac454b; background: #fff8e5; }
+.christmas-steps .step-number { display: inline; position: static; width: auto; height: auto; border: 0; border-radius: 0; background: transparent; font: italic 29px var(--serif); color: #a6854e; margin: 0; }
+.step-kicker { display: block; font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: #9b6843; margin-bottom: 10px; }
+.christmas-steps .step h3 { font: 24px/1.2 var(--serif); color: #35523e; margin-bottom: 13px; max-width: 240px; }
+.christmas-steps .step p { color: #65715f; font-size: 12px; line-height: 1.9; margin-bottom: 22px; }
+.step-footer { display: block; margin-top: auto; padding-top: 13px; border-top: 1px dashed #c9b895; color: #96754b; font: italic 14px/1.5 var(--serif); }
+@media (max-width: 1000px) {
+  .holiday-occasions .occasion { gap: 9px; padding: 0 9px; }
+  .occasion-bauble { width: 42px; height: 42px; }
+  .holiday-occasions .occasion strong { font-size: 15px; }
+  .christmas-steps .christmas-step { padding: 26px 22px; }
+}
+@media (max-width: 760px) {
+  .brand-holiday { gap: 7px; }
+  .santa-launch { width: 92px; height: 58px; }
+  .brand-title { font-size: 10px; letter-spacing: .11em; }
+  .holiday-occasions { padding: 38px 10px 27px; gap: 29px 0; }
+  .holiday-occasions .occasion { display: flex; flex-direction: column; gap: 10px; text-align: center; }
+  .holiday-occasions .occasion-icon { margin: 0; }
+  .holiday-occasions .occasion-label { font-size: 8px; }
+  .holiday-occasions .occasion strong { font-size: 17px; }
+  .hero-visual figcaption span.family-photo-label { font-size: 18px; }
+  .christmas-steps { grid-template-columns: 1fr; gap: 18px; }
+  .guide-heading h2 { font-size: 29px; }
+  .guide-heading > p { font-size: 12px; }
+  .christmas-steps .christmas-step { padding: 28px; }
+  .christmas-steps .step h3 { max-width: none; }
+}
+@media (max-width: 420px) {
+  .santa-launch { width: 76px; height: 49px; }
+  .brand-holiday { gap: 4px; }
+  .brand-title { font-size: 9px; letter-spacing: .07em; }
+  .brand-title small { font-size: 8px; letter-spacing: .1em; }
+}
+body.motion-paused .santa-flight { display: none; }
+@media (prefers-reduced-motion: reduce) { .santa-flight { display: none; } }

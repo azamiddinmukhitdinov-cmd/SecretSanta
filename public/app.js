@@ -19,6 +19,7 @@ let organizerLogin = false;
 let motionPaused = false;
 let connectionLost = false;
 let draftStored = true;
+let santaFlightTimer;
 try { motionPaused = localStorage.getItem('santa-motion-paused') === 'true'; } catch {}
 
 function applyMotionPreference() {
@@ -26,9 +27,13 @@ function applyMotionPreference() {
   const button = document.querySelector('[data-action="toggle-motion"]');
   if (button) {
     button.setAttribute('aria-pressed', String(motionPaused));
-    button.setAttribute('aria-label', motionPaused ? 'Включить анимацию снега и гирлянды' : 'Остановить анимацию снега и гирлянды');
+    button.setAttribute('aria-label', motionPaused ? 'Включить праздничную анимацию' : 'Остановить праздничную анимацию');
     const label = button.querySelector('.motion-toggle-label');
     if (label) label.textContent = motionPaused ? 'Включить анимацию' : 'Остановить анимацию';
+  }
+  if (motionPaused) {
+    const flight = document.querySelector('#santa-flight');
+    if (flight) { flight.hidden = true; flight.classList.remove('is-flying'); }
   }
 }
 applyMotionPreference();
@@ -49,6 +54,8 @@ const symbols = {
   exit: '<path d="M9 4H4v16h5m5-12 4 4-4 4m-5-4h12"/>',
   check: '<path d="m5 12 4 4L19 6"/>',
   heart: '<path d="M20.5 5.5a5 5 0 0 0-7.1 0L12 7l-1.4-1.5a5 5 0 0 0-7.1 7.1L12 21l8.5-8.4a5 5 0 0 0 0-7.1Z"/>',
+  letter: '<rect x="3" y="5" width="18" height="15" rx="2"/><path d="m3 7 9 7 9-7M8 3h8m-8 0v2m8-2v2"/>',
+  sparkle: '<path d="m12 2 2.6 7.4L22 12l-7.4 2.6L12 22l-2.6-7.4L2 12l7.4-2.6L12 2Z"/>',
 };
 const icon = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${symbols[name] || symbols.gift}</svg>`;
 const escape = (value = '') => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -80,6 +87,18 @@ function notify(message, isError = false) {
   toastElement.textContent = message;
   toastElement.classList.add('visible');
   toastTimer = setTimeout(() => toastElement.classList.remove('visible'), isError ? 8500 : 5500);
+}
+
+function santaRide() {
+  const flight = document.querySelector('#santa-flight');
+  notify('Дед Мороз уже в пути! Пусть у нашей семьи сбываются желания 🎄');
+  if (!flight || motionPaused || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  clearTimeout(santaFlightTimer);
+  flight.hidden = false;
+  flight.classList.remove('is-flying');
+  void flight.offsetWidth;
+  flight.classList.add('is-flying');
+  santaFlightTimer = setTimeout(() => { flight.hidden = true; flight.classList.remove('is-flying'); }, 5200);
 }
 
 async function task(button, action, errorTarget) {
@@ -222,9 +241,9 @@ function hero() {
       <p class="hero-caption">Ведь главное — мы вместе.</p>
       <div class="hero-buttons">${locked ? `<button class="button button-primary" data-action="open-access">У меня есть личная ссылка ${icon('arrow')}</button>` : `<a class="button button-primary" href="${member && !member.ready ? '#participant-form' : '#participation'}">${member?.ready ? 'К моему конверту' : 'Заполнить мою карточку'} ${icon('arrow')}</a>`}</div>
     </div>
-    <figure class="hero-visual">${locked ? placeholder() : familyPortrait()}<figcaption><span>${!locked && state.profiles?.length && !member ? 'Нажмите на своего персонажа' : 'Когда вся семья рядом'}</span><span>Ташкент · 2027</span></figcaption><span class="photo-star" aria-hidden="true">✧</span><div class="photo-badge" aria-hidden="true">С ЛЮБОВЬЮ<b>2027</b>ДЛЯ СВОИХ</div></figure>
+    <figure class="hero-visual">${locked ? placeholder() : familyPortrait()}<figcaption><span>${!locked && state.profiles?.length && !member ? 'Нажмите на своего персонажа' : 'Когда вся семья рядом'}</span><span class="family-photo-label">Семья</span></figcaption><span class="photo-star" aria-hidden="true">✧</span><div class="photo-badge" aria-hidden="true">С ЛЮБОВЬЮ<b>2027</b>ДЛЯ СВОИХ</div></figure>
   </section>
-  <div class="occasion-bar" aria-label="Условия игры"><div class="occasion">${icon('gift', 'occasion-icon')}<div><span class="occasion-label">Бюджет на подарок</span><strong>$50–100</strong></div></div><div class="occasion">${icon('gift', 'occasion-icon')}<div><span class="occasion-label">Жеребьёвка</span><strong>22 ноября 2026</strong></div></div><div class="occasion">${icon('calendar', 'occasion-icon')}<div><span class="occasion-label">Заполняем пожелания</span><strong>до 6 декабря 2026</strong></div></div><div class="occasion">${icon('heart', 'occasion-icon')}<div><span class="occasion-label">Вручаем подарки</span><strong>1 января 2027</strong></div></div><span class="timezone-note">Все даты по Ташкенту · UTC+5</span></div>${holidayMood()}`;
+  <div class="occasion-bar holiday-occasions" aria-label="Новогодние даты и условия игры"><div class="occasion"><span class="occasion-bauble">${icon('gift', 'occasion-icon')}</span><div><span class="occasion-label">Бюджет на подарок</span><strong>$50–100</strong></div></div><div class="occasion"><span class="occasion-bauble">${icon('sparkle', 'occasion-icon')}</span><div><span class="occasion-label">Жеребьёвка</span><strong>22 ноября 2026</strong></div></div><div class="occasion"><span class="occasion-bauble">${icon('letter', 'occasion-icon')}</span><div><span class="occasion-label">Заполняем пожелания</span><strong>до 6 декабря 2026</strong></div></div><div class="occasion"><span class="occasion-bauble">${icon('heart', 'occasion-icon')}</span><div><span class="occasion-label">Вручаем подарки</span><strong>1 января 2027</strong></div></div><span class="timezone-note">Все даты по Ташкенту · UTC+5</span></div>${holidayMood()}`;
 }
 
 function familyPortrait() {
@@ -272,7 +291,7 @@ function savedLink() {
 }
 
 function steps() {
-  return `<section class="steps" aria-label="Как всё устроено"><div class="step"><span class="step-number">01</span><h3>Откройте конверт 22 ноября</h3><p>После жеребьёвки узнайте, кого вы порадуете в этом году.</p></div><div class="step"><span class="step-number">02</span><h3>Отправьте письмо до 6 декабря</h3><p>Пара идей поможет вашему Санте выбрать подарок. Пожелания можно заполнить заранее и исправлять позже.</p></div><div class="step"><span class="step-number">03</span><h3>Подарите немного счастья</h3><p>Встречаемся 1 января. Имя вашего Санты останется сюрпризом!</p></div></section>`;
+  return `<section class="christmas-guide" aria-label="Как всё устроено"><div class="guide-heading"><span class="eyebrow">Наша новогодняя традиция</span><h2>Три шага к маленькому чуду</h2><p>Одно тайное имя, письмо с мечтами и подарок от души.</p></div><div class="steps christmas-steps"><article class="step christmas-step"><div class="step-decoration" aria-hidden="true">${icon('sparkle', 'step-symbol')}<span class="step-number">01</span></div><span class="step-kicker">Секрет под ёлкой</span><h3>Откройте конверт 22 ноября</h3><p>После жеребьёвки узнайте, кого вы порадуете в этом году.</p><span class="step-footer">Маленький секрет — большое волшебство</span></article><article class="step christmas-step"><div class="step-decoration" aria-hidden="true">${icon('letter', 'step-symbol')}<span class="step-number">02</span></div><span class="step-kicker">Письмо с мечтами</span><h3>Отправьте письмо до 6 декабря</h3><p>Пара идей поможет вашему Санте выбрать подарок. Пожелания можно заполнить заранее и исправлять позже.</p><span class="step-footer">Напишите, чему обрадуется сердце</span></article><article class="step christmas-step"><div class="step-decoration" aria-hidden="true">${icon('gift', 'step-symbol')}<span class="step-number">03</span></div><span class="step-kicker">С теплом и любовью</span><h3>Подарите немного счастья</h3><p>Встречаемся 1 января. Имя вашего Санты останется сюрпризом!</p><span class="step-footer">Самый тёплый подарок — быть вместе</span></article></div></section>`;
 }
 
 function portrait(profile, className = 'profile-avatar') {
@@ -501,6 +520,7 @@ document.addEventListener('click', async event => {
     return;
   }
   const action = button.dataset.action;
+  if (action === 'santa-ride') { santaRide(); return; }
   if (action === 'wish-prompt') {
     const textarea = document.querySelector('#member-wishes');
     const prompt = wishPrompts[button.dataset.prompt];
