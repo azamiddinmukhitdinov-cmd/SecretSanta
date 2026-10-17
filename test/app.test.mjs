@@ -505,7 +505,7 @@ test('migration from schema v1 preserves cards, credentials and existing assignm
   assert.equal(own.recipient.wishes, 'Сохранённые пожелания Б');
   const db = new DatabaseSync(join(f.dataDir, 'santa.sqlite'), { readOnly: true });
   try {
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
     assert.ok(db.prepare('PRAGMA table_info(participants)').all().some(column => column.name === 'profile_id'));
     assert.ok(db.prepare('PRAGMA index_list(participants)').all().some(index => index.name === 'participants_profile_id_unique' && index.unique));
   } finally { db.close(); }
@@ -535,4 +535,108 @@ test('invalid private profile configuration fails startup instead of silently ex
       assert.throws(() => createApp({ dataDir, rateLimit: false }), /family-profiles\.json/);
     });
   }
+});
+
+test('batch invitations preserve existing links, make private drafts, and are idempotent', async t => {
+  const f = await fixture(t, BEFORE_DEADLINE, { profiles: SYNTHETIC_PROFILES });
+  const admin = await f.admin();
+  const existing = await f.add(admin, {profileId:SYNTHETIC_PROFILES[0].id, wishes:'EXISTING_PRIVATE_WISH',ready:true});
+  expectStatus(await (await f.invited()).request('/api/admin/invitations',{method:'POST',body:{}}),403);
+  const batch = expectStatus(await admin.request('/api/admin/invitations',{method:'POST',body:{}}),200);
+  assert.equal(batch.invitations.length,2);
+  assert.deepEqual(batch.invitations.map(p=>p.profileId),SYNTHETIC_PROFILES.slice(1).map(p=>p.id));
+  const newClients=[];
+  for (const invitation of batch.invitations) {
+    const client=await f.personal(invitation.personalUrl);
+    newClients.push(client);
+    const state=await client.state();
+    assert.equal(state.participant.id,invitation.id);
+    assert.equal(state.participant.name,invitation.name);
+    assert.equal(state.participant.ready,false);
+    assert.equal(state.participant.wishes,'');
+  }
+  assert.equal((await existing.client.state()).participant.wishes,'EXISTING_PRIVATE_WISH');
+  assert.deepEqual((await (await f.invited()).state()).game.readiness,{ready:1,total:3});
+  assert.ok(!Object.hasOwn((await f.client().state()).game,'readiness'));
+  assert.deepEqual(expectStatus(await admin.request('/api/admin/invitations',{method:'POST',body:{}}),200).invitations,[]);
+  assert.equal((await admin.state()).admin.participants.length,3);
+  for (const [i,client] of newClients.entries()) {
+    expectStatus(await client.request('/api/me',{method:'PATCH',body:{wishes:'NEW_PRIVATE_WISH_'+i,ready:true}}),200);
+  }
+  const invited=await (await f.invited()).state();
+  assert.deepEqual(invited.game.readiness,{ready:3,total:3});
+  assert.ok(!JSON.stringify(invited).includes('PRIVATE_WISH'));
+  for (const invitation of batch.invitations) assert.ok(!JSON.stringify(invited).includes(personalToken(invitation.personalUrl)));
+  expectStatus(await f.action(admin,'draw'),200);
+  expectStatus(await admin.request('/api/admin/invitations',{method:'POST',body:{}}),409);
+  await f.restart();
+  assert.equal((await existing.client.state()).participant.name,SYNTHETIC_PROFILES[0].name);
+  assert.equal((await newClients[0].state()).participant.ready,true);
+});
+
+test('workshop is private to the giver, persists, and resets with assignments', async t => {
+  const f=await fixture(t);
+  let admin=await f.admin();
+  const a=await f.add(admin,card('Первый тестовый Санта'));
+  const b=await f.add(admin,card('Второй тестовый Санта'));
+  expectStatus(await a.client.request('/api/workshop',{method:'PATCH',body:{idea:true}}),409);
+  expectStatus(await admin.request('/api/workshop',{method:'PATCH',body:{idea:true}}),403);
+  expectStatus(await (await f.invited()).request('/api/workshop',{method:'PATCH',body:{idea:true}}),403);
+  expectStatus(await f.action(admin,'draw'),200);
+  const empty={idea:false,bought:false,wrapped:false};
+  assert.deepEqual((await a.client.state()).workshop,empty);
+  expectStatus(await a.client.request('/api/workshop',{method:'PATCH',body:{idea:true,bought:true,wrapped:true}}),200);
+  assert.deepEqual((await a.client.state()).workshop,{idea:true,bought:true,wrapped:true});
+  assert.deepEqual((await b.client.state()).workshop,empty);
+  assert.ok(!Object.hasOwn((await b.client.state()).recipient,'workshop'));
+  const adminState=await admin.state();
+  assert.ok(!Object.hasOwn(adminState,'workshop'));
+  assert.ok(adminState.admin.participants.every(p=>!Object.hasOwn(p,'workshop')));
+  expectStatus(await a.client.request('/api/workshop',{method:'PATCH',body:{idea:'yes'}}),400);
+  expectStatus(await a.client.request('/api/workshop',{method:'PATCH',body:{id:b.participant.id,idea:true}}),400);
+  expectStatus(await a.client.request('/api/workshop',{method:'PATCH',body:{}}),400);
+  expectStatus(await a.client.request('/api/workshop',{method:'PATCH',origin:'https://other.invalid',body:{wrapped:false}}),403);
+  await f.restart();
+  assert.deepEqual((await a.client.state()).workshop,{idea:true,bought:true,wrapped:true});
+  admin=await f.admin();
+  const rotated=expectStatus(await f.action(admin,'rotate-personal',{id:a.participant.id}),200);
+  const newAccess=await f.personal(rotated.personalUrl);
+  assert.deepEqual((await newAccess.state()).workshop,{idea:true,bought:true,wrapped:true});
+  expectStatus(await a.client.request('/api/workshop',{method:'PATCH',body:{idea:false}}),403);
+  expectStatus(await f.action(admin,'reset',{confirm:true}),200);
+  assert.equal((await newAccess.state()).workshop,null);
+  expectStatus(await f.action(admin,'draw'),200);
+  assert.deepEqual((await newAccess.state()).workshop,empty);
+});
+
+test('schema v2 upgrade keeps existing cards, access and exact assignments', async t => {
+  const f=await fixture(t);
+  const admin=await f.admin();
+  const a=await f.add(admin,card('Сохранённый участник А'));
+  await f.add(admin,card('Сохранённый участник Б'));
+  expectStatus(await f.action(admin,'draw'),200);
+  const before=await admin.state();
+  const legacy=new DatabaseSync(join(f.dataDir,'santa.sqlite'));
+  legacy.exec('DROP TABLE gift_progress; PRAGMA user_version=2');
+  legacy.close();
+  await f.restart();
+  const after=await (await f.admin()).state();
+  assert.deepEqual(after.admin.participants,before.admin.participants);
+  assert.deepEqual(after.admin.assignments,before.admin.assignments);
+  assert.equal((await a.client.state()).participant.id,a.participant.id);
+  assert.deepEqual((await a.client.state()).workshop,{idea:false,bought:false,wrapped:false});
+});
+
+test('a batch invitation conflict rolls back every new card', async t => {
+  const f=await fixture(t,BEFORE_DEADLINE,{profiles:SYNTHETIC_PROFILES});
+  const admin=await f.admin();
+  const legacy=await f.add(admin,{profileId:SYNTHETIC_PROFILES[1].id,ready:true});
+  const db=new DatabaseSync(join(f.dataDir,'santa.sqlite'));
+  db.prepare('UPDATE participants SET profile_id=NULL WHERE id=?').run(legacy.participant.id);
+  db.close();
+  expectStatus(await admin.request('/api/admin/invitations',{method:'POST',body:{}}),409);
+  const state=await admin.state();
+  assert.equal(state.admin.participants.length,1);
+  assert.ok(state.profiles.every(profile=>!profile.claimed));
+  assert.equal((await legacy.client.state()).participant.id,legacy.participant.id);
 });

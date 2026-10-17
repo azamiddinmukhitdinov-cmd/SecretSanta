@@ -132,6 +132,13 @@ export function createStore(directory) {
       draw_version INTEGER NOT NULL,
       CHECK(giver_id <> recipient_id)
     );
+    CREATE TABLE IF NOT EXISTS gift_progress (
+      participant_id TEXT PRIMARY KEY REFERENCES participants(id) ON DELETE CASCADE,
+      draw_version INTEGER NOT NULL,
+      idea INTEGER NOT NULL DEFAULT 0,
+      bought INTEGER NOT NULL DEFAULT 0,
+      wrapped INTEGER NOT NULL DEFAULT 0
+    );
   `);
   // Existing databases retain every card, credential and assignment. Profiles
   // are optional metadata, so legacy cards remain unbound until explicitly added.
@@ -140,7 +147,7 @@ export function createStore(directory) {
     if (!db.prepare('PRAGMA table_info(participants)').all().some(column => column.name === 'profile_id')) {
       db.exec('ALTER TABLE participants ADD COLUMN profile_id TEXT');
     }
-    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS participants_profile_id_unique ON participants(profile_id); PRAGMA user_version = 2; COMMIT;');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS participants_profile_id_unique ON participants(profile_id); PRAGMA user_version = 3; COMMIT;');
   } catch (error) {
     db.exec('ROLLBACK');
     db.close();
@@ -168,7 +175,7 @@ export function createStore(directory) {
     const s = settings();
     return s.phase === 'registration' && !s.registration_closed && now.getTime() < Date.parse(DEADLINE);
   };
-  const createParticipant = (input, now, { admin = false } = {}) => transaction(() => {
+  const createParticipantInTransaction = (input, now, { admin = false } = {}) => {
     requireRegistrationPhase();
     if (!admin && !registrationOpen(now)) throw new AppError(409, 'Приём карточек закрыт. Обратитесь к организатору.');
     if (db.prepare('SELECT COUNT(*) AS total FROM participants').get().total >= 100) throw new AppError(409, 'В игре уже 100 участников. Обратитесь к организатору.');
@@ -196,6 +203,17 @@ export function createStore(directory) {
       .run(id, value.name, value.normalizedName, value.wishes, value.avoid, JSON.stringify(value.links), admin ? 1 : 0, value.ready ? 1 : 0, now.getTime(), profile?.id ?? null);
     db.prepare("INSERT INTO credentials(token_hash,kind,participant_id) VALUES (?, 'participant', ?)").run(hash(personalToken), id);
     return { participant: participant(id), personalToken };
+  };
+  const createParticipant = (input, now, options) => transaction(() => createParticipantInTransaction(input, now, options));
+  const prepareInvitations = now => transaction(() => {
+    requireRegistrationPhase();
+    const existing = new Set(participants().map(person => person.profileId));
+    const missing = profiles.filter(profile => !existing.has(profile.id));
+    if (participants().length + missing.length > 100) throw new AppError(409, 'В игре может быть не больше 100 участников.');
+    return missing.map(profile => {
+      const result = createParticipantInTransaction({ profileId: profile.id, ready: false }, now, { admin: true });
+      return { id: result.participant.id, profileId: profile.id, name: profile.name, personalToken: result.personalToken };
+    });
   });
   const editParticipant = (id, input, now) => transaction(() => {
     const current = participant(id);
@@ -238,6 +256,7 @@ export function createStore(directory) {
       const receivers = drawRecipients(ids);
       const version = settings().draw_version + 1;
       const insert = db.prepare('INSERT INTO assignments(giver_id,recipient_id,draw_version) VALUES (?,?,?)');
+      db.prepare('DELETE FROM gift_progress').run();
       ids.forEach((id, index) => insert.run(id, receivers[index], version));
       db.prepare("UPDATE settings SET phase='drawn', registration_closed=1, editing_open=0, draw_version=? WHERE id=1").run(version);
       return { ok: true };
@@ -246,6 +265,7 @@ export function createStore(directory) {
       if (input.confirm !== true) throw new AppError(400, 'Подтвердите отмену: прежние назначения перестанут действовать для всех.');
       if (settings().phase !== 'drawn') throw new AppError(409, 'Активной жеребьёвки пока нет.');
       db.prepare('DELETE FROM assignments').run();
+      db.prepare('DELETE FROM gift_progress').run();
       db.prepare("UPDATE settings SET phase='registration',editing_open=0,draw_version=draw_version+1 WHERE id=1").run();
       return { ok: true };
     }
@@ -279,5 +299,24 @@ export function createStore(directory) {
     return result;
   };
 
-  return { db, dataDir, access, settings, participants, participant, listProfiles, registrationOpen, credential, assignments, recipient, createParticipant, editParticipant, adminAction, close: () => db.close() };
+  const workshop = id => {
+    if (settings().phase !== 'drawn' || !participant(id)?.approved || !recipient(id)) return null;
+    const row = db.prepare('SELECT idea,bought,wrapped FROM gift_progress WHERE participant_id=? AND draw_version=?').get(id, settings().draw_version);
+    return { idea: Boolean(row?.idea), bought: Boolean(row?.bought), wrapped: Boolean(row?.wrapped) };
+  };
+  const updateWorkshop = (id, input) => transaction(() => {
+    const current = workshop(id);
+    if (!current) throw new AppError(409, 'Мастерская откроется после жеребьёвки для её участников.');
+    const keys = Object.keys(input);
+    if (!keys.length || keys.some(key => !['idea', 'bought', 'wrapped'].includes(key) || typeof input[key] !== 'boolean')) {
+      throw new AppError(400, 'Отметки мастерской должны быть логическими значениями.');
+    }
+    const value = { ...current, ...input };
+    db.prepare(`INSERT INTO gift_progress(participant_id,draw_version,idea,bought,wrapped) VALUES(?,?,?,?,?)
+      ON CONFLICT(participant_id) DO UPDATE SET draw_version=excluded.draw_version,idea=excluded.idea,bought=excluded.bought,wrapped=excluded.wrapped`)
+      .run(id, settings().draw_version, Number(value.idea), Number(value.bought), Number(value.wrapped));
+    return value;
+  });
+
+  return { db, dataDir, access, settings, participants, participant, listProfiles, registrationOpen, credential, assignments, recipient, createParticipant, prepareInvitations, editParticipant, adminAction, workshop, updateWorkshop, close: () => db.close() };
 }

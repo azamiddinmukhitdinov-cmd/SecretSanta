@@ -97,11 +97,19 @@ export function createApp({ dataDir = './data', clock = () => new Date(), rateLi
     const s = store.settings();
     const participant = authentication.participantId ? store.participant(authentication.participantId) : null;
     const access = authentication.admin ? 'organizer' : participant ? 'participant' : authentication.invited ? 'invited' : 'locked';
+    const people = store.participants();
+    const profiles = store.listProfiles();
     const result = {
       game: { title: 'Семейный Тайный Санта — 2027', budgetMin: 50, budgetMax: 100, currency: 'USD', deadline: DEADLINE, exchangeDate: EXCHANGE_DATE, timezone: 'Asia/Tashkent', phase: s.phase, registrationOpen: store.registrationOpen(now), editingOpen: Boolean(s.editing_open), drawVersion: s.draw_version, participantCount: store.participants().length },
       access, participant, recipient: participant?.approved && s.phase === 'drawn' ? store.recipient(participant.id) : null,
       profiles: access === 'locked' ? [] : store.listProfiles(),
     };
+    result.game.exchangeAt = '2027-01-01T00:00:00+05:00';
+    if (access !== 'locked') result.game.readiness = {
+      ready: people.filter(person => person.ready).length,
+      total: profiles.length + people.filter(person => !person.profileId).length,
+    };
+    if (participant) result.workshop = store.workshop(participant.id);
     if (authentication.admin) result.admin = { participants: store.participants(), assignments: store.assignments(), invitationUrl: `${origin}/#invite=${store.access.inviteToken}` };
     return result;
   };
@@ -157,6 +165,17 @@ export function createApp({ dataDir = './data', clock = () => new Date(), rateLi
           if (!authentication.participantId) throw new AppError(403, 'Откройте свою личную ссылку для редактирования карточки.');
           store.editParticipant(authentication.participantId, input, clock());
           return send(response, 200, { ok: true });
+        }
+        if (request.method === 'PATCH' && path === '/api/workshop') {
+          if (!authentication.participantId) throw new AppError(403, 'Откройте свою личную ссылку.');
+          return send(response, 200, { workshop: store.updateWorkshop(authentication.participantId, input) });
+        }
+        if (request.method === 'POST' && path === '/api/admin/invitations') {
+          requireAdmin(authentication);
+          const invitations = store.prepareInvitations(clock()).map(({ personalToken, ...person }) => ({
+            ...person, personalUrl: `${origin}/#personal=${personalToken}`,
+          }));
+          return send(response, 200, { invitations });
         }
         if (request.method === 'POST' && path === '/api/admin/participants') {
           requireAdmin(authentication);

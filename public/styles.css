@@ -580,7 +580,7 @@ html:has(body.motion-paused) { scroll-behavior: auto; }
 }
 .skip-link:not(:focus) { clip-path: inset(50%); width: 1px; height: 1px; padding: 0; overflow: hidden; }
 
-/* Personal invitations are prepared one person at a time. */
+/* Personal invitations and prepared message packages. */
 .personal-invitations { margin-bottom: 26px; }
 .personal-invitations .card-topline { margin-bottom: 12px; }
 .personal-invitations .card-topline .eyebrow { font-size: 8px; letter-spacing: .12em; }
@@ -617,4 +617,56 @@ html:has(body.motion-paused) { scroll-behavior: auto; }
   .invitation-person .avatar { width: 43px; height: 43px; }
   .invitation-name { font-size: 14px; }
   .participant-actions .new-personal-link { gap: 5px; padding: 6px; font-size: 9px; }
+}
+
+/* Family portrait: native SVG coordinates keep every face aligned at any width. */
+.family-portrait-map { position: relative; width: 100%; aspect-ratio: 3 / 2; overflow: hidden; border-radius: 6px; }
+.hero-visual .family-portrait-map img { width: 100%; height: auto; aspect-ratio: 3 / 2; object-fit: contain; object-position: center; }
+.portrait-hotspots { position: absolute; inset: 0; width: 100%; height: 100%; }
+.portrait-hotspot { cursor: pointer; }
+.portrait-hotspot ellipse { fill: transparent; stroke: transparent; stroke-width: 8px; transition: fill .18s, stroke .18s; }
+.portrait-hotspot:not([aria-disabled='true']):hover ellipse, .portrait-hotspot:not([aria-disabled='true']):focus ellipse { fill: #fff7c720; stroke: #fff3ba; }
+.portrait-hotspot[aria-disabled='true'] { cursor: default; }
+.hotspot-name { opacity: 0; fill: #fffef5; stroke: #173d31; stroke-width: 9px; paint-order: stroke; font: 600 44px var(--sans); pointer-events: none; transition: opacity .18s; }
+.portrait-hotspot:not([aria-disabled='true']):hover .hotspot-name, .portrait-hotspot:not([aria-disabled='true']):focus .hotspot-name { opacity: 1; }
+.hero-visual .photo-badge, .hero-visual .photo-star { pointer-events: none; }
+.holiday-mood { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: center; padding: 24px 28px; margin: 0 0 42px; border: 1px solid #c7d9c8; border-radius: 18px; background: linear-gradient(110deg, #fff9e9, #e8f2e8); color: #214a3d; box-shadow: 0 8px 25px #07352214; }
+.holiday-countdown { font-size: clamp(14px, 1.8vw, 21px); font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 9px; }
+.family-readiness label { font-size: 13px; margin-bottom: 7px; }
+.family-readiness label strong { white-space: nowrap; }
+.family-readiness progress { display: block; width: 100%; height: 12px; border: 0; border-radius: 10px; overflow: hidden; accent-color: #397b54; background: #d7e3d5; }
+.family-readiness progress::-webkit-progress-bar { background: #d7e3d5; border-radius: 10px; }
+.family-readiness progress::-webkit-progress-value { background: #397b54; border-radius: 10px; }
+.family-readiness progress::-moz-progress-bar { background: #397b54; border-radius: 10px; }
+.family-readiness p { font-size: 11px; margin-top: 8px; color: #62786a; }
+.wish-inspiration { padding: 17px 18px; margin: 15px 0 24px; border: 1px dashed #c8c3a1; border-radius: 12px; background: #fbf7e8; }
+.wish-inspiration p { font-size: 11px; color: #697462; margin-top: 6px; }
+.wish-chips, .invitation-tools { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 13px; }
+.wish-chip { border: 1px solid #cbd6bd; border-radius: 20px; color: #31583f; background: #fffef6; font-size: 12px; padding: 8px 13px; min-height: 40px; }
+.wish-chip:hover:not(:disabled) { background: #e7eedc; border-color: #719071; }
+.letter-stamp.is-delivered { border-color: #477954; color: #2c6a43; }
+.letter-stamp.is-delivered small { font-size: 8px; letter-spacing: .05em; }
+.stamp-just-sent { animation: letter-stamped .65s ease-out; }
+.letter-received { padding: 12px 15px; margin-bottom: 20px; border-radius: 8px; background: #e9f1df; color: #356046; font-size: 12px; }
+@keyframes letter-stamped { from { opacity: 0; transform: scale(1.5) rotate(-24deg); } to { opacity: 1; transform: scale(1) rotate(-8deg); } }
+.santa-workshop { margin-top: 24px; background: #fffaf0; border-color: #ddcda9; }
+.santa-workshop h3 { font: 27px/1.2 var(--serif); margin: 10px 0; }
+.santa-workshop > p { font-size: 12px; color: #61745e; }
+.workshop-checks { display: grid; gap: 11px; margin-top: 20px; }
+.workshop-checks label { display: flex; gap: 13px; align-items: center; margin: 0; padding: 12px; border: 1px solid #d8ddc9; background: #fffef8; border-radius: 10px; cursor: pointer; }
+.workshop-checks input { width: 22px; height: 22px; flex: none; padding: 0; accent-color: #37694c; }
+.workshop-checks label span { font-size: 13px; color: #335a42; }
+.workshop-checks label:has(input:checked) { background: #eaf0e1; }
+.workshop-checks input:checked + span { text-decoration: line-through; }
+.santa-workshop .workshop-result { margin-top: 17px; color: #426547; font-size: 12px; }
+@media (max-width: 760px) {
+  .holiday-mood { grid-template-columns: 1fr; padding: 22px; gap: 20px; }
+  .holiday-countdown { font-size: 17px; }
+  .wish-chips { gap: 7px; }
+  .wish-chip { font-size: 11px; padding: 8px 11px; }
+  .invitation-tools .button { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stamp-just-sent { animation: none; }
+  .portrait-hotspot ellipse, .hotspot-name { transition: none; }
 }
