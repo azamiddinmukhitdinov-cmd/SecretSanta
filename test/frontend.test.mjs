@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 // A DOM stub checks client rendering and handlers without changing the live game.
-function client({ storage = new Map(), storageFails = false } = {}) {
+function client({ storage = new Map(), storageFails = false, onRequest, search = '' } = {}) {
   const handlers = {};
   const elements = new Map();
   const element = () => ({ innerHTML: '', textContent: '', open: false, showModal() { this.open = true; }, close() { this.open = false; }, classList: { toggle() {}, add() {}, remove() {} }, querySelector() { return null; } });
@@ -13,15 +13,16 @@ function client({ storage = new Map(), storageFails = false } = {}) {
   let replacedUrl = '';
   let now = Date.parse('2026-12-31T18:59:00Z');
   const context = vm.createContext({
-    document: { querySelector: id => elements.get(id) || null, body: element(), addEventListener: (type, handler) => { handlers[type] = handler; } },
+    document: { querySelector: id => elements.get(id) || null, querySelectorAll: () => [], body: element(), addEventListener: (type, handler) => { handlers[type] = handler; } },
     window: { addEventListener() {}, matchMedia: () => ({ matches: false }) },
     localStorage: { getItem(key) { return storage.get(key) || null; }, setItem(key, value) { if (storageFails) throw new Error('Storage disabled'); storage.set(key, value); }, removeItem(key) { storage.delete(key); } },
     FormData: class { constructor(form) { this.values = form.values; } get(key) { return this.values[key] ?? null; } },
     setTimeout: () => 1, clearTimeout() {}, setInterval() {},
     URL, URLSearchParams, Blob,
-    location: { hash: '#organizer', pathname: '/', search: '', origin: 'https://example.invalid' },
+    location: { hash: '#organizer', pathname: '/', search, origin: 'https://example.invalid' },
     history: { replaceState(_state, _title, url) { replacedUrl = url; } },
-    fetch: async path => {
+    fetch: async (path, options) => {
+      if (onRequest && path !== '/api/state') return onRequest(path, options);
       assert.equal(path, '/api/state', 'Public organizer entry must not send an access token');
       return { ok: true, json: async () => responseState };
     },
@@ -32,7 +33,7 @@ function client({ storage = new Map(), storageFails = false } = {}) {
     setState(value) { state=value; }, select(id) { selectedProfileId=id; },
     familyPortrait, holidayMood, countdownText, participantForm, workshopPanel, memberView,
     personalInvitations, rememberInvitation, invitationMessage, render, openOrganizer, start,
-    captureDraft, restoreDraft, clearDraft, draftKey, getFormData, draftStatusText, emailPanel
+    captureDraft, restoreDraft, clearDraft, draftKey, getFormData, draftStatusText, emailPanel, mailSetup
   };`, context);
   return { api: context.api, elements, handlers, setTime: value => { now = Date.parse(value); }, mockState: value => { responseState = value; }, replacedUrl: () => replacedUrl };
 }
@@ -192,4 +193,44 @@ test('new participant drafts are separated by profile and storage failure is vis
   unavailable.elements.set('#participant-form', form);
   unavailable.handlers.input({ target: { closest: () => form } });
   assert.ok(unavailable.api.draftStatusText().includes('Не удалось сохранить черновик'));
+});
+
+test('both email forms submit JSON through their handlers without native navigation', async () => {
+  for (const [id, path, values] of [
+    ['email-form', '/api/email', { email: 'test@example.invalid', enabled: 'on' }],
+    ['mail-setup-form', '/api/admin/mail', { provider: 'gmail', from: 'sender@example.invalid', password: 'test-application-password' }],
+  ]) {
+    const sent = [];
+    const c = client({ onRequest: async (url, options) => {
+      sent.push({ url, options }); return { ok: true, json: async () => ({ ok: true }) };
+    } });
+    const s = state(); s.access = 'participant';
+    s.participant = { id: 'test-member', name: 'Тест', wishes: '', avoid: '', links: [], ready: true, approved: true };
+    c.api.setState(s); c.mockState(s);
+    let prevented = false, reset = false;
+    const form = { id, values, querySelector: () => null, reset() { reset = true; } };
+    await c.handlers.submit({ target: form, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true, `${id} must not perform a native form submission`);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].url, path);
+    assert.equal(sent[0].options.method, 'POST');
+    assert.ok(!sent[0].url.includes(values.password || values.email));
+    const body = JSON.parse(sent[0].options.body);
+    if (id === 'email-form') {
+      assert.equal(body.participantId, s.participant.id);
+      assert.equal(body.email, values.email);
+      assert.equal(body.enabled, true);
+      assert.match(c.api.emailPanel(), /method="post" action="\/api\/email"/);
+    } else {
+      assert.equal(body.password, values.password);
+      assert.equal(reset, true, 'Clear password form after success');
+      assert.match(c.api.mailSetup(), /method="post" action="\/api\/admin\/mail"/);
+    }
+  }
+});
+
+test('legacy native form query is removed from the current address and history entry', async () => {
+  const c = client({ search: '?provider=gmail&from=test%40example.invalid&password=synthetic-password' });
+  await c.api.start();
+  assert.equal(c.replacedUrl(), '/#organizer');
 });
