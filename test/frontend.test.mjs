@@ -33,7 +33,7 @@ function client({ storage = new Map(), storageFails = false, onRequest, search =
     setState(value) { state=value; }, select(id) { selectedProfileId=id; },
     familyPortrait, holidayMood, countdownText, participantForm, workshopPanel, memberView,
     personalInvitations, rememberInvitation, invitationMessage, render, openOrganizer, start,
-    captureDraft, restoreDraft, clearDraft, draftKey, getFormData, draftStatusText, emailPanel, mailSetup
+    captureDraft, restoreDraft, clearDraft, draftKey, getFormData, draftStatusText, emailPanel, mailSetup, adminView, recipientCard
   };`, context);
   return { api: context.api, elements, handlers, setTime: value => { now = Date.parse(value); }, mockState: value => { responseState = value; }, replacedUrl: () => replacedUrl };
 }
@@ -233,4 +233,27 @@ test('legacy native form query is removed from the current address and history e
   const c = client({ search: '?provider=gmail&from=test%40example.invalid&password=synthetic-password' });
   await c.api.start();
   assert.equal(c.replacedUrl(), '/#organizer');
+});
+
+test('November draw does not require finished wishes and recipient view explains waiting until December 6', () => {
+  const c = client(), s = state();
+  s.access = 'organizer';
+  const a = { id: 'a', name: 'А', wishes: '', avoid: '', links: [], ready: false, approved: true };
+  const b = { ...a, id: 'b', name: 'Б' };
+  s.admin = { participants: [a, b], assignments: [], invitationUrl: 'https://example.invalid/#invite=TEST' };
+  s.game.drawAvailable = false;
+  c.api.setState(s);
+  assert.match(c.api.adminView(), /data-action="draw" disabled/);
+  s.game.drawAvailable = true;
+  assert.doesNotMatch(c.api.adminView(), /data-action="draw" disabled/);
+  s.participant = a; s.recipient = { ...b, wishesReady: false };
+  s.game.phase = 'drawn'; s.game.registrationOpen = false; s.game.editingOpen = true;
+  assert.ok(c.api.recipientCard().includes('Получатель ещё готовит письмо'));
+  assert.ok(c.api.recipientCard().includes('до 6 декабря включительно'));
+  assert.match(c.api.memberView(), /data-action="edit-wishes"[^>]*>Заполнить пожелания/);
+  s.recipient.wishesReady = true;
+  assert.ok(!c.api.recipientCard().includes('Получатель ещё готовит письмо'));
+  const invitation = c.api.invitationMessage({ name: 'А', personalUrl: 'https://example.invalid/#personal=TEST' });
+  assert.ok(invitation.includes('22 ноября') && invitation.includes('6 декабря'));
+  assert.ok(!invitation.includes('25 декабря'));
 });

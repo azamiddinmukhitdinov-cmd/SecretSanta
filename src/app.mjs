@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
-import { createStore, hash, AppError, DEADLINE, EXCHANGE_DATE } from './store.mjs';
+import { createStore, hash, AppError, DEADLINE, EXCHANGE_DATE, DRAW_DATE, DRAW_AT } from './store.mjs';
 import { createMail } from './mail.mjs';
 
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
@@ -111,6 +111,9 @@ export async function createApp({ dataDir = './data', clock = () => new Date(), 
       profiles: access === 'locked' ? [] : store.listProfiles(),
     };
     result.game.exchangeAt = '2027-01-01T00:00:00+05:00';
+    result.game.drawDate = DRAW_DATE;
+    result.game.drawAt = DRAW_AT;
+    result.game.drawAvailable = now.getTime() >= Date.parse(DRAW_AT);
     if (access !== 'locked') result.game.readiness = {
       ready: people.filter(person => person.ready).length,
       total: profiles.length + people.filter(person => !person.profileId).length,

@@ -200,7 +200,7 @@ test('registration creates a private pending card, rejects duplicate names, unsa
   assert.equal((await personal.state()).participant.wishes, 'Книги и настольные игры');
 });
 
-test('drawing requires at least two approved participants with ready cards', async t => {
+test('drawing requires at least two approved participants and accepts unfinished wishes', async t => {
   const f = await fixture(t);
   const admin = await f.admin();
   expectStatus(await f.action(admin, 'draw'), 409);
@@ -217,14 +217,47 @@ test('drawing requires at least two approved participants with ready cards', asy
   expectStatus(await f.action(admin, 'draw'), 409);
   expectStatus(await f.action(admin, 'approve', { id: secondId }), 200);
   expectStatus(await second.request('/api/me', { method: 'PATCH', body: { ready: false } }), 200);
-  expectStatus(await f.action(admin, 'draw'), 409);
-  assert.equal((await admin.state()).game.phase, 'registration');
-  expectStatus(await second.request('/api/me', { method: 'PATCH', body: { ready: true } }), 200);
   expectStatus(await f.action(admin, 'draw'), 200);
   const firstState = await first.state();
   assert.equal(firstState.game.phase, 'drawn');
   assert.equal(firstState.recipient.id, secondId);
   assert.equal((await second.state()).recipient.id, firstId);
+  assert.equal((await second.state()).participant.ready, false);
+  assert.equal(firstState.recipient.wishesReady, false);
+  assert.equal(firstState.recipient.wishes, '');
+  assert.deepEqual(firstState.notifications, []);
+  expectStatus(await second.request('/api/me', { method: 'PATCH', body: { ready: true } }), 200);
+  assert.equal((await first.state()).recipient.wishesReady, true);
+  assert.equal((await first.state()).notifications[0].kind, 'wishes');
+});
+
+test('draw opens exactly on November 22 and unfinished letters can be submitted by December 6 and corrected later', async t => {
+  const f = await fixture(t, '2026-11-21T18:59:59.999Z'), admin = await f.admin();
+  const a = await f.add(admin, { name: 'Позднее письмо А', wishes: 'PRIVATE_UNSENT_DRAFT', ready: false });
+  const b = await f.add(admin, { name: 'Позднее письмо Б', ready: false });
+  const initial = await admin.state();
+  assert.equal(initial.game.drawDate, '2026-11-22');
+  assert.equal(initial.game.deadline, '2026-12-06T19:00:00.000Z');
+  assert.equal(initial.game.drawAvailable, false);
+  expectStatus(await f.action(admin, 'draw'), 409);
+  f.setTime('2026-11-21T19:00:00.000Z');
+  assert.equal((await admin.state()).game.drawAvailable, true);
+  expectStatus(await f.action(admin, 'draw'), 200);
+  const drawn = await admin.state();
+  const giver = await b.client.state();
+  assert.equal(giver.recipient.id, a.participant.id);
+  assert.equal(giver.recipient.wishesReady, false);
+  assert.equal(giver.recipient.wishes, '');
+  assert.deepEqual(giver.notifications, []);
+  f.setTime('2026-12-06T18:59:59.999Z');
+  expectStatus(await a.client.request('/api/me', { method: 'PATCH', body: { wishes: 'Отправленное пожелание', ready: true } }), 200);
+  assert.equal((await b.client.state()).recipient.wishes, 'Отправленное пожелание');
+  assert.equal((await b.client.state()).notifications.length, 1);
+  f.setTime('2026-12-06T19:00:00.000Z');
+  expectStatus(await a.client.request('/api/me', { method: 'PATCH', body: { wishes: 'Исправление после срока' } }), 200);
+  assert.equal((await b.client.state()).recipient.wishes, 'Исправление после срока');
+  assert.equal((await b.client.state()).notifications.length, 2);
+  assert.deepEqual((await admin.state()).admin.assignments, drawn.admin.assignments);
 });
 
 test('nine-person draw gives exactly one unique recipient per person and reveals only the personal result', async t => {
@@ -247,7 +280,7 @@ test('nine-person draw gives exactly one unique recipient per person and reveals
     assert.equal(state.participant.id, member.participant.id);
     assert.notEqual(state.recipient.id, member.participant.id);
     assert.ok(ids.has(state.recipient.id));
-    assert.deepEqual(Object.keys(state.recipient).sort(), ['avoid', 'id', 'links', 'name', 'profile', 'profileId', 'updatedAt', 'wishes']);
+    assert.deepEqual(Object.keys(state.recipient).sort(), ['avoid', 'id', 'links', 'name', 'profile', 'profileId', 'updatedAt', 'wishes', 'wishesReady']);
     assert.equal(state.recipient.profileId, null);
     assert.equal(state.recipient.profile, null);
     recipients.add(state.recipient.id);
@@ -277,7 +310,7 @@ test('wish updates stay available after the deadline and draw, persist and reach
   const a = await f.add(admin, card('Участник А'));
   const b = await f.add(admin, card('Участник Б'));
   const c = await f.add(admin, card('Участник В'));
-  f.setTime('2026-12-26T00:00:00+05:00');
+  f.setTime('2026-12-07T00:00:00+05:00');
   assert.equal((await a.client.state()).game.registrationOpen, false);
   const update = { wishes: 'Теперь хочу настольную игру', avoid: 'Без шоколада', links: ['https://example.invalid/gift'] };
   expectStatus(await a.client.request('/api/me', { method: 'PATCH', body: update }), 200);
@@ -474,12 +507,12 @@ test('participants, access links and the exact drawn pairs survive a server rest
   }
 });
 
-test('registration closes exactly at midnight on December 26 in Tashkent', async t => {
-  const f = await fixture(t, '2026-12-25T18:59:59.999Z');
+test('registration closes exactly at midnight on December 7 in Tashkent', async t => {
+  const f = await fixture(t, '2026-12-06T18:59:59.999Z');
   const invited = await f.invited();
   assert.equal((await invited.state()).game.registrationOpen, true);
   expectStatus(await invited.request('/api/participants', { method: 'POST', body: card('Анна') }), 201);
-  f.setTime('2026-12-25T19:00:00.000Z');
+  f.setTime('2026-12-06T19:00:00.000Z');
   assert.equal((await invited.state()).game.registrationOpen, false);
   const closed = await (await f.invited()).request('/api/participants', { method: 'POST', body: card('Борис') });
   assert.ok(closed.status >= 400, 'A card submitted at the deadline must be rejected');

@@ -3,7 +3,9 @@ import { mkdirSync, existsSync, readFileSync, writeFileSync, chmodSync } from 'n
 import { join, resolve } from 'node:path';
 import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
 
-export const DEADLINE = '2026-12-25T19:00:00.000Z';
+export const DEADLINE = '2026-12-06T19:00:00.000Z';
+export const DRAW_DATE = '2026-11-22';
+export const DRAW_AT = '2026-11-21T19:00:00.000Z';
 export const EXCHANGE_DATE = '2027-01-01';
 export const token = () => randomBytes(32).toString('base64url');
 export const hash = (value) => createHash('sha256').update(value).digest('hex');
@@ -268,9 +270,10 @@ export function createStore(directory) {
     const duplicate = db.prepare('SELECT id FROM participants WHERE normalized_name = ? AND id <> ?').get(value.normalizedName, id);
     if (duplicate) throw new AppError(409, 'Карточка с таким именем уже есть. Уточните имя.');
     const approved = value.name === current.name ? (current.approved ? 1 : 0) : 0;
+    const ready = s.phase === 'drawn' && current.ready ? true : value.ready;
     db.prepare('UPDATE participants SET name=?,normalized_name=?,wishes=?,avoid=?,links=?,ready=?,approved=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?')
-      .run(value.name, value.normalizedName, value.wishes, value.avoid, JSON.stringify(value.links), s.phase === 'drawn' ? 1 : (value.ready ? 1 : 0), approved, now.getTime(), id, current.revision);
-    if (s.phase === 'drawn' && (value.wishes !== current.wishes || value.avoid !== current.avoid || JSON.stringify(value.links) !== JSON.stringify(current.links))) {
+      .run(value.name, value.normalizedName, value.wishes, value.avoid, JSON.stringify(value.links), Number(ready), approved, now.getTime(), id, current.revision);
+    if (s.phase === 'drawn' && ready && (!current.ready || value.wishes !== current.wishes || value.avoid !== current.avoid || JSON.stringify(value.links) !== JSON.stringify(current.links))) {
       const giver = db.prepare('SELECT giver_id FROM assignments WHERE recipient_id=?').get(id);
       if (giver) addNotification(giver.giver_id, 'wishes', `wishes:${id}:${current.revision + 1}`, now);
     }
@@ -293,9 +296,10 @@ export function createStore(directory) {
     }
     if (action === 'draw') {
       requireRegistrationPhase();
+      if (now.getTime() < Date.parse(DRAW_AT)) throw new AppError(409, 'Жеребьёвка откроется 22 ноября 2026 года по времени Ташкента.');
       const people = participants();
       if (people.length < 2) throw new AppError(409, 'Для жеребьёвки нужны хотя бы два участника.');
-      if (people.some(p => !p.approved || !p.ready)) throw new AppError(409, 'Сначала подтвердите всех участников и дождитесь заполнения карточек.');
+      if (people.some(p => !p.approved)) throw new AppError(409, 'Сначала подтвердите всех участников. Пожелания они смогут заполнить после жеребьёвки.');
       const ids = people.map(p => p.id);
       const receivers = drawRecipients(ids);
       const version = settings().draw_version + 1;
@@ -303,7 +307,9 @@ export function createStore(directory) {
       db.prepare('DELETE FROM gift_progress').run();
       ids.forEach((id, index) => insert.run(id, receivers[index], version));
       db.prepare("UPDATE settings SET phase='drawn', registration_closed=1, draw_version=? WHERE id=1").run(version);
-      for (const id of ids) addNotification(id, 'wishes', `draw:${version}:${id}`, now);
+      ids.forEach((id, index) => {
+        if (participant(receivers[index]).ready) addNotification(id, 'wishes', `draw:${version}:${id}`, now);
+      });
       return { ok: true };
     }
     if (action === 'reset') {
@@ -326,7 +332,7 @@ export function createStore(directory) {
     }
     if (action === 'open-registration') {
       requireRegistrationPhase();
-      if (now.getTime() >= Date.parse(DEADLINE)) throw new AppError(409, 'Срок приёма карточек закончился 25 декабря по Ташкенту. Можно отдельно открыть редактирование пожеланий.');
+      if (now.getTime() >= Date.parse(DEADLINE)) throw new AppError(409, 'Срок первого заполнения карточек закончился 6 декабря по Ташкенту. Можно отдельно открыть редактирование пожеланий.');
       db.prepare('UPDATE settings SET registration_closed=0 WHERE id=1').run();
       return { ok: true };
     }
@@ -342,7 +348,7 @@ export function createStore(directory) {
     const row = db.prepare('SELECT p.* FROM assignments a JOIN participants p ON p.id=a.recipient_id WHERE a.giver_id=?').get(id);
     if (!row) return null;
     const { approved: _a, ready: _r, revision: _v, ...result } = card(row);
-    return result;
+    return { ...result, wishesReady: Boolean(row.ready), ...(!row.ready ? { wishes: '', avoid: '', links: [] } : {}) };
   };
 
   const workshop = id => {
