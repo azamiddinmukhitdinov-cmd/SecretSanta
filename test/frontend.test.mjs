@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 // A DOM stub checks client rendering and handlers without changing the live game.
-function client() {
+function client({ storage = new Map(), storageFails = false } = {}) {
   const handlers = {};
   const elements = new Map();
   const element = () => ({ innerHTML: '', textContent: '', open: false, showModal() { this.open = true; }, close() { this.open = false; }, classList: { toggle() {}, add() {}, remove() {} }, querySelector() { return null; } });
@@ -15,7 +15,8 @@ function client() {
   const context = vm.createContext({
     document: { querySelector: id => elements.get(id) || null, body: element(), addEventListener: (type, handler) => { handlers[type] = handler; } },
     window: { addEventListener() {}, matchMedia: () => ({ matches: false }) },
-    localStorage: { getItem() { return null; } },
+    localStorage: { getItem(key) { return storage.get(key) || null; }, setItem(key, value) { if (storageFails) throw new Error('Storage disabled'); storage.set(key, value); }, removeItem(key) { storage.delete(key); } },
+    FormData: class { constructor(form) { this.values = form.values; } get(key) { return this.values[key] ?? null; } },
     setTimeout: () => 1, clearTimeout() {}, setInterval() {},
     URL, URLSearchParams, Blob,
     location: { hash: '#organizer', pathname: '/', search: '', origin: 'https://example.invalid' },
@@ -30,7 +31,8 @@ function client() {
   vm.runInContext(source + `\nglobalThis.api = {
     setState(value) { state=value; }, select(id) { selectedProfileId=id; },
     familyPortrait, holidayMood, countdownText, participantForm, workshopPanel, memberView,
-    personalInvitations, rememberInvitation, invitationMessage, render, openOrganizer, start
+    personalInvitations, rememberInvitation, invitationMessage, render, openOrganizer, start,
+    captureDraft, restoreDraft, clearDraft, draftKey, getFormData, draftStatusText, emailPanel
   };`, context);
   return { api: context.api, elements, handlers, setTime: value => { now = Date.parse(value); }, mockState: value => { responseState = value; }, replacedUrl: () => replacedUrl };
 }
@@ -152,4 +154,42 @@ test('public organizer entry opens the cabinet directly for an existing organize
   await c.api.start();
   assert.ok(c.elements.get('#main').innerHTML.includes('Кабинет организатора'));
   assert.equal(c.elements.get('#access-dialog').open, false);
+});
+
+test('draft survives closing the page, stays scoped to its participant and keeps its original revision', () => {
+  const storage = new Map(), c = client({ storage }), s = state();
+  s.access = 'participant';
+  s.participant = { id: 'card-a', name: 'А', wishes: 'На сервере', avoid: '', links: [], ready: true, revision: 1 };
+  c.api.setState(s);
+  const form = { values: { name: 'А', wishes: 'Мой незавершённый черновик', avoid: 'Без сладкого', links: 'https://example.invalid/gift' } };
+  c.elements.set('#participant-form', form);
+  c.handlers.input({ target: { closest: () => form } });
+  assert.ok(storage.has('santa-draft:v1:member:card-a'));
+  const reopened = client({ storage });
+  s.participant.revision = 2;
+  reopened.api.setState(s); reopened.api.restoreDraft();
+  const html = reopened.api.participantForm(s.participant);
+  assert.ok(html.includes('Мой незавершённый черновик'));
+  assert.ok(html.includes('Показать сохранённую карточку'));
+  assert.equal(reopened.api.getFormData(form).revision, 1, 'Restoring a draft must not upgrade its revision silently');
+  assert.equal(reopened.api.getFormData(form).participantId, 'card-a');
+  const other = client({ storage });
+  const second = { ...s, participant: { ...s.participant, id: 'card-b', name: 'Б' } };
+  other.api.setState(second); other.api.restoreDraft();
+  assert.ok(!other.api.participantForm(second.participant).includes('Мой незавершённый черновик'));
+  reopened.api.clearDraft(); assert.equal(storage.has('santa-draft:v1:member:card-a'), false);
+});
+
+test('new participant drafts are separated by profile and storage failure is visible', () => {
+  const storage = new Map(), c = client({ storage }); c.api.setState(state()); c.api.select('a');
+  const form = { values: { name: 'А', wishes: 'Пожелание для А', avoid: '', links: '' } };
+  c.elements.set('#participant-form', form);
+  c.handlers.input({ target: { closest: () => form } });
+  assert.ok(storage.has('santa-draft:v1:new:a'));
+  const other = client({ storage }); other.api.setState(state()); other.api.select('b'); other.api.restoreDraft();
+  assert.ok(!other.api.participantForm().includes('Пожелание для А'));
+  const unavailable = client({ storageFails: true }); unavailable.api.setState(state()); unavailable.api.select('a');
+  unavailable.elements.set('#participant-form', form);
+  unavailable.handlers.input({ target: { closest: () => form } });
+  assert.ok(unavailable.api.draftStatusText().includes('Не удалось сохранить черновик'));
 });

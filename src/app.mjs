@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
 import { createStore, hash, AppError, DEADLINE, EXCHANGE_DATE } from './store.mjs';
+import { createMail } from './mail.mjs';
 
 const publicDir = fileURLToPath(new URL('../public/', import.meta.url));
 const cookieNames = { invite: 'santa_invite', personal: 'santa_personal', admin: 'santa_admin' };
@@ -23,9 +24,14 @@ export function validateAppUrl(value, production = false) {
   return url.origin;
 }
 
-export function createApp({ dataDir = './data', clock = () => new Date(), rateLimit = true, appUrl, production = false } = {}) {
+export async function createApp({ dataDir = './data', clock = () => new Date(), rateLimit = true, appUrl, production = false, transportFactory } = {}) {
   const configuredOrigin = validateAppUrl(appUrl, production);
   const store = createStore(dataDir);
+  let mail;
+  try { mail = await createMail(store, { appUrl: configuredOrigin, clock, transportFactory }); }
+  catch (error) { store.close(); throw error; }
+  const mailTimer = setInterval(() => { mail.flush().catch(() => {}); }, 60000);
+  mailTimer.unref();
   const limits = new Map();
   let requestsSinceCleanup = 0;
   const cookie = (name, value, maxAge = 31536000) => `${name}=${value}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${maxAge}${configuredOrigin?.startsWith('https:') ? '; Secure' : ''}`;
@@ -110,7 +116,10 @@ export function createApp({ dataDir = './data', clock = () => new Date(), rateLi
       total: profiles.length + people.filter(person => !person.profileId).length,
     };
     if (participant) result.workshop = store.workshop(participant.id);
+    if (participant) result.notifications = store.notifications(participant.id);
+    if (participant) result.email = { ...store.mailPreferences(participant.id), deliveryConfigured: mail.status().configured };
     if (authentication.admin) result.admin = { participants: store.participants(), assignments: store.assignments(), invitationUrl: `${origin}/#invite=${store.access.inviteToken}` };
+    if (authentication.admin) result.admin.mail = mail.status();
     return result;
   };
 
@@ -155,6 +164,18 @@ export function createApp({ dataDir = './data', clock = () => new Date(), rateLi
           return send(response, 200, { ok: true }, { 'Set-Cookie': cookie(cookieNames[type], value, type === 'admin' ? 2592000 : 31536000) });
         }
         if (request.method === 'POST' && path === '/api/logout') return send(response, 200, { ok: true }, { 'Set-Cookie': Object.values(cookieNames).map(name => cookie(name, '', 0)) });
+        if (request.method === 'POST' && path === '/api/email/verify') return send(response, 200, store.verifyMail(input.token, clock()));
+        if (request.method === 'POST' && path === '/api/email') {
+          if (!authentication.participantId) throw new AppError(403, 'Откройте свою личную ссылку.');
+          if (input.participantId !== authentication.participantId) throw new AppError(409, 'Откройте личную ссылку нужного участника.');
+          const email = store.setMailPreferences(authentication.participantId, input, clock(), mail.status().configured);
+          return send(response, 200, { email });
+        }
+        if (request.method === 'POST' && path === '/api/admin/mail') {
+          requireAdmin(authentication);
+          if (!configuredOrigin) throw new AppError(400, 'Сначала настройте публичный HTTPS-адрес сайта.');
+          return send(response, 200, { mail: await mail.save(input) });
+        }
         if (request.method === 'POST' && path === '/api/participants') {
           if (!authentication.admin && !authentication.invited) throw new AppError(403, 'Сначала откройте общее приглашение из семейной группы.');
           if (authentication.participantId) throw new AppError(409, 'У вас уже есть карточка. Отредактируйте её вместо создания новой.');
@@ -168,7 +189,12 @@ export function createApp({ dataDir = './data', clock = () => new Date(), rateLi
         }
         if (request.method === 'PATCH' && path === '/api/workshop') {
           if (!authentication.participantId) throw new AppError(403, 'Откройте свою личную ссылку.');
-          return send(response, 200, { workshop: store.updateWorkshop(authentication.participantId, input) });
+          return send(response, 200, { workshop: store.updateWorkshop(authentication.participantId, input, clock()) });
+        }
+        if (request.method === 'POST' && path === '/api/notifications/read') {
+          if (!authentication.participantId) throw new AppError(403, 'Откройте свою личную ссылку.');
+          store.readNotifications(authentication.participantId, clock());
+          return send(response, 200, { ok: true });
         }
         if (request.method === 'POST' && path === '/api/admin/invitations') {
           requireAdmin(authentication);
@@ -211,5 +237,5 @@ export function createApp({ dataDir = './data', clock = () => new Date(), rateLi
   });
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
-  return { server, store, access: { ...store.access }, close: async () => { if (server.listening) await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())); store.close(); } };
+  return { server, store, mail, access: { ...store.access }, close: async () => { clearInterval(mailTimer); if (server.listening) await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())); await mail.close(); store.close(); } };
 }

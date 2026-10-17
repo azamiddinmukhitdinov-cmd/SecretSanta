@@ -17,6 +17,8 @@ let invitationBatch = [];
 let letterJustSent = false;
 let organizerLogin = false;
 let motionPaused = false;
+let connectionLost = false;
+let draftStored = true;
 try { motionPaused = localStorage.getItem('santa-motion-paused') === 'true'; } catch {}
 
 function applyMotionPreference() {
@@ -56,15 +58,18 @@ const safeLink = (value) => {
 };
 
 async function request(path, options = {}) {
-  const response = await fetch(path, {
+  let response;
+  try { response = await fetch(path, {
     credentials: 'same-origin',
     cache: 'no-store',
     ...options,
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-  });
+  }); } catch (error) { connectionLost = true; updateDraftStatus(); throw error; }
+  connectionLost = false;
+  updateDraftStatus();
   let data;
   try { data = await response.json(); } catch { throw new Error('Сервер не ответил. Попробуйте ещё раз чуть позже.'); }
-  if (!response.ok) throw new Error(data.error || 'Не получилось выполнить действие. Попробуйте ещё раз.');
+  if (!response.ok) { const error = new Error(data.error || 'Не получилось выполнить действие. Попробуйте ещё раз.'); error.status = response.status; throw error; }
   return data;
 }
 const post = (path, body) => request(path, { method: 'POST', body: JSON.stringify(body) });
@@ -86,6 +91,8 @@ async function task(button, action, errorTarget) {
   if (errorTarget) errorTarget.textContent = '';
   try { await action(); }
   catch (error) {
+    captureDraft();
+    if (error.status === 409 && formDirty) await refresh().catch(() => {});
     const message = error instanceof TypeError ? 'Не удалось связаться с сайтом. Проверьте интернет и попробуйте снова.' : error.message;
     if (errorTarget?.isConnected) { errorTarget.textContent = message; errorTarget.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
     else notify(message, true);
@@ -117,14 +124,58 @@ function getFormData(form) {
   if (links.some(value => !safeLink(value))) throw new Error('Каждая ссылка должна начинаться с https:// или http://.');
   const name = String(values.get('name') || '').trim();
   if (!name) throw new Error('Напишите, пожалуйста, ваше имя.');
-  return { name, wishes: String(values.get('wishes') || '').trim(), avoid: String(values.get('avoid') || '').trim(), links, ready: true, ...(!state.participant && selectedProfileId ? { profileId: selectedProfileId } : {}) };
+  return { name, wishes: String(values.get('wishes') || '').trim(), avoid: String(values.get('avoid') || '').trim(), links, ready: true, ...(state.participant ? { participantId: state.participant.id, revision: draft?.revision ?? state.participant.revision } : {}), ...(!state.participant && selectedProfileId ? { profileId: selectedProfileId } : {}) };
+}
+
+function draftKey() {
+  if (state?.participant) return `santa-draft:v1:member:${state.participant.id}`;
+  if (state?.access === 'invited' || state?.access === 'organizer') return `santa-draft:v1:new:${selectedProfileId || 'unbound'}`;
+  return null;
+}
+
+function persistDraft() {
+  const key = draftKey();
+  if (!key || !draft) return;
+  try { localStorage.setItem(key, JSON.stringify({ ...draft, savedAt: Date.now() })); draftStored = true; }
+  catch { draftStored = false; }
+  updateDraftStatus();
+}
+
+function restoreDraft() {
+  const key = draftKey();
+  if (!key || draft) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!saved) return;
+    if (Date.now() - saved.savedAt > 30 * 86400000 || !Number.isFinite(saved.savedAt) || !['name', 'wishes', 'avoid', 'linksText'].every(key => typeof saved[key] === 'string') || saved.wishes.length > 2000 || saved.avoid.length > 1000 || saved.linksText.length > 10240) { localStorage.removeItem(key); return; }
+    if (state.participant && !Number.isSafeInteger(saved.revision)) return;
+    draft = saved; formDirty = true; draftStored = true;
+  } catch { draftStored = false; }
+}
+
+function clearDraft() {
+  const key = draftKey();
+  try { if (key) localStorage.removeItem(key); } catch {}
+  draft = null; formDirty = false;
+}
+
+function draftStatusText() {
+  if (!draftStored && formDirty) return 'Не удалось сохранить черновик на устройстве. Не закрывайте страницу до отправки.';
+  if (connectionLost) return formDirty ? 'Связь потеряна. Черновик сохранён на этом устройстве — отправьте его после восстановления связи.' : 'Связь с сайтом потеряна. Сохранённые карточки появятся после подключения.';
+  return formDirty ? 'Черновик сохранён на этом устройстве. Чтобы Санта увидел изменения, нажмите «Сохранить изменения».' : 'Письмо сохраняется на устройстве во время ввода. Отправьте его, когда будете готовы.';
+}
+
+function updateDraftStatus() {
+  const status = document.querySelector('#draft-status');
+  if (status) status.textContent = draftStatusText();
 }
 
 function captureDraft() {
   const form = document.querySelector('#participant-form');
   if (!form || !formDirty) return;
   const values = new FormData(form);
-  draft = { name: values.get('name'), wishes: values.get('wishes'), avoid: values.get('avoid'), linksText: values.get('links'), open: document.querySelector('.detail-editor')?.open ?? true };
+  draft = { name: String(values.get('name') || ''), wishes: String(values.get('wishes') || ''), avoid: String(values.get('avoid') || ''), linksText: String(values.get('links') || ''), revision: draft?.revision ?? state?.participant?.revision, open: document.querySelector('.detail-editor')?.open ?? true };
+  persistDraft();
 }
 
 async function refresh({ silent = false } = {}) {
@@ -132,6 +183,8 @@ async function refresh({ silent = false } = {}) {
   const next = await request('/api/state');
   if (sequence !== pollSequence) return;
   const previous = state;
+  captureDraft();
+  if (previous?.participant?.id !== next.participant?.id || previous?.access !== next.access) { draft = null; formDirty = false; }
   state = next;
   if (state.access !== 'organizer') invitationBatch = [];
   else invitationBatch = invitationBatch.filter(item => state.admin.participants.some(person => person.id === item.id));
@@ -148,9 +201,9 @@ async function refresh({ silent = false } = {}) {
     notify(state.game.phase === 'drawn' ? 'Жеребьёвка проведена! Ваш конверт уже ждёт.' : 'Организатор отменил жеребьёвку. Предыдущее назначение больше не действует.');
   }
   if (state.access !== 'organizer') activeTab = 'member';
+  restoreDraft();
   const needsRender = !silent || changedDraw || !previous || JSON.stringify(previous) !== JSON.stringify(next);
   if (needsRender) {
-    captureDraft();
     render();
   }
 }
@@ -208,7 +261,7 @@ function wishInspiration(disabled) {
 
 function workshopPanel() {
   if (!state.workshop) return '';
-  const labels = { idea: 'Придумал подарок', bought: 'Купил или сделал', wrapped: 'Упаковал' };
+  const labels = { idea: 'Подарок выбран — сообщить получателю', bought: 'Купил или сделал', wrapped: 'Упаковал' };
   const complete = Object.values(state.workshop).filter(Boolean).length;
   return `<section class="card santa-workshop" aria-labelledby="workshop-title"><span class="eyebrow">Только для вас</span><h3 id="workshop-title">Моя мастерская Санты</h3><p>Маленький план большого сюрприза. Эти отметки видите только вы.</p><div class="workshop-checks">${Object.entries(labels).map(([key, label]) => `<label><input type="checkbox" data-workshop="${key}" ${state.workshop[key] ? 'checked' : ''} /><span>${label}</span></label>`).join('')}</div><p class="workshop-result" role="status">${complete === 3 ? 'Всё готово! Осталось дождаться встречи 🎁' : `Готово ${complete} из 3 — идём к празднику шаг за шагом.`}</p></section>`;
 }
@@ -248,10 +301,15 @@ function fields(member, disabled) {
     <div class="field"><label for="member-links">Ссылки на подарки <span>по желанию</span></label><textarea class="links-input" id="member-links" name="links" rows="2" maxlength="10240" spellcheck="false" placeholder="https://…" ${disabled ? 'disabled' : ''}>${escape(linksText)}</textarea><p class="field-hint">До 5 ссылок, каждая с новой строки. Начните с https:// или http://.</p></div>`;
 }
 
+function draftConflict(member) {
+  if (!member || !formDirty || !draft || draft.revision === member.revision) return '';
+  return `<section class="notice notice-warning draft-conflict" role="alert"><strong>Эта карточка уже изменена на другом устройстве</strong><p>Ваш черновик остался в полях ниже. Сравните его с последней сохранённой карточкой:</p><details><summary>Показать сохранённую карточку</summary><p class="wish-preview">${escape(member.wishes || 'Пожелания не указаны')}</p><p class="wish-preview">Не дарить: ${escape(member.avoid || 'не указано')}</p><p class="wish-preview">${member.links.map(escape).join('<br>')}</p></details><div class="draft-actions"><button class="button button-quiet button-small" type="button" data-action="discard-draft">Загрузить сохранённую карточку</button><button class="button button-secondary button-small" type="button" data-action="keep-draft">Оставить мой вариант после сравнения</button></div></section>`;
+}
+
 function participantForm(member = null) {
   const allowed = state.game.registrationOpen || (Boolean(member) && state.game.editingOpen);
   const profile = member?.profile || state.profiles?.find(profile => profile.id === selectedProfileId);
-  return `<form id="participant-form"><div class="letter-header"><div><span class="letter-kicker">Семейная почта · Новый год 2027</span><h3 class="letter-title">Письмо моему Тайному Санте</h3></div><span class="letter-stamp ${member?.ready ? 'is-delivered' : ''} ${letterJustSent ? 'stamp-just-sent' : ''}" aria-hidden="true">${member?.ready ? '✓' : '✧'}<small>${member?.ready ? 'ДОСТАВЛЕНО' : 'С ЛЮБОВЬЮ'}</small></span></div>${avatarPanel(profile)}<p class="letter-salutation">Дорогой Тайный Санта!</p>${wishInspiration(!allowed)}${fields(member, !allowed)}${member?.ready ? '<p class="letter-received">✓ Письмо доставлено Санте.</p>' : ''}<p class="letter-signature">С теплом и в ожидании маленького чуда${profile ? `, ${escape(profile.name)}` : ''}.</p><p class="form-error" id="participant-error" role="alert"></p><div class="form-bottom"><p>${allowed ? 'Пожелания увидят ваш Санта и организатор.' : 'Сейчас изменение карточек закрыто. Обратитесь к организатору.'}</p><button class="button button-primary" type="submit" ${allowed ? '' : 'disabled'}>${member?.ready ? `${icon('check')} Сохранить изменения` : `Отправить моё письмо ${icon('arrow')}`}</button></div></form>`;
+  return `<form id="participant-form"><div class="letter-header"><div><span class="letter-kicker">Семейная почта · Новый год 2027</span><h3 class="letter-title">Письмо моему Тайному Санте</h3></div><span class="letter-stamp ${member?.ready ? 'is-delivered' : ''} ${letterJustSent ? 'stamp-just-sent' : ''}" aria-hidden="true">${member?.ready ? '✓' : '✧'}<small>${member?.ready ? 'ДОСТАВЛЕНО' : 'С ЛЮБОВЬЮ'}</small></span></div>${avatarPanel(profile)}<p class="letter-salutation">Дорогой Тайный Санта!</p>${draftConflict(member)}${wishInspiration(!allowed)}${fields(member, !allowed)}<p class="draft-status" id="draft-status" role="status">${escape(draftStatusText())}</p>${member?.ready ? '<p class="letter-received">✓ Письмо доставлено Санте.</p>' : ''}<p class="letter-signature">С теплом и в ожидании маленького чуда${profile ? `, ${escape(profile.name)}` : ''}.</p><p class="form-error" id="participant-error" role="alert"></p><div class="form-bottom"><p>${allowed ? 'Пожелания увидят ваш Санта и организатор.' : 'Сейчас изменение карточек закрыто. Обратитесь к организатору.'}</p><button class="button button-primary" type="submit" ${allowed ? '' : 'disabled'}>${member?.ready ? `${icon('check')} Сохранить изменения` : `Отправить моё письмо ${icon('arrow')}`}</button></div></form>`;
 }
 
 function registration() {
@@ -283,7 +341,23 @@ function recipientCard() {
 function memberView() {
   const member = state.participant;
   const canEdit = state.game.registrationOpen || state.game.editingOpen;
-  return `<section class="section" id="participation"><div class="member-heading"><div class="member-name"><div class="avatar" aria-hidden="true">${member.profile ? portrait(member.profile, "profile-avatar") : escape(initials(member.name))}</div><div><span class="eyebrow">Ваш уголок волшебства</span><h2>Привет, ${escape(member.name)}!</h2><div class="member-meta"><span class="status-pill ${member.approved ? '' : 'status-pending'}">${member.approved ? 'Участие подтверждено' : 'Ждём подтверждения'}</span><span>${member.ready ? 'Карточка сохранена' : 'Анкета ещё не заполнена'}</span></div></div></div><div class="member-actions">${canEdit ? `<button class="button button-secondary button-small" type="button" data-action="edit-wishes" aria-controls="wish-editor">${member.ready ? 'Изменить пожелания' : 'Заполнить пожелания'}</button>` : ''}<button class="text-button" data-action="refresh">${icon('refresh')} Обновить</button></div></div>${savedLink()}<div class="member-grid"><div>${revealed && state.recipient ? recipientCard() : envelopeCard()}${workshopPanel()}<p class="member-note"><strong>Один подарок — одному человеку.</strong> Каждый участник получает подарок от одного Санты. Имена получателей знает организатор.</p></div><div><details class="detail-editor" id="wish-editor" ${draft?.open || !member.ready ? 'open' : ''}><summary><div><h3>Мои пожелания</h3><p>${!member.ready ? (state.game.registrationOpen || state.game.editingOpen ? 'Заполните пожелания и отправьте письмо Санте' : 'Анкета не заполнена. Обратитесь к организатору') : state.game.registrationOpen || state.game.editingOpen ? 'Передумали? Обновите пожелания — ваш Санта увидит изменения' : 'Посмотреть сохранённую карточку'}</p></div></summary><div class="editor-body letter-card">${participantForm(member)}</div></details><p class="member-note">Вручение — <strong>1 января 2027 года</strong>.<br>Бюджет подарка — <strong>$50–100</strong>.</p></div></div></section>`;
+  return `<section class="section" id="participation"><div class="member-heading"><div class="member-name"><div class="avatar" aria-hidden="true">${member.profile ? portrait(member.profile, "profile-avatar") : escape(initials(member.name))}</div><div><span class="eyebrow">Ваш уголок волшебства</span><h2>Привет, ${escape(member.name)}!</h2><div class="member-meta"><span class="status-pill ${member.approved ? '' : 'status-pending'}">${member.approved ? 'Участие подтверждено' : 'Ждём подтверждения'}</span><span>${member.ready ? 'Карточка сохранена' : 'Анкета ещё не заполнена'}</span></div></div></div><div class="member-actions">${canEdit ? `<button class="button button-secondary button-small" type="button" data-action="edit-wishes" aria-controls="wish-editor">${member.ready ? 'Изменить пожелания' : 'Заполнить пожелания'}</button>` : ''}<button class="text-button" data-action="refresh">${icon('refresh')} Обновить</button></div></div>${savedLink()}<div class="member-grid"><div>${revealed && state.recipient ? recipientCard() : envelopeCard()}${workshopPanel()}${notificationPanel()}${emailPanel()}<p class="member-note"><strong>Один подарок — одному человеку.</strong> Каждый участник получает подарок от одного Санты. Имена получателей знает организатор.</p></div><div><details class="detail-editor" id="wish-editor" ${draft?.open || !member.ready ? 'open' : ''}><summary><div><h3>Мои пожелания</h3><p>${!member.ready ? (state.game.registrationOpen || state.game.editingOpen ? 'Заполните пожелания и отправьте письмо Санте' : 'Анкета не заполнена. Обратитесь к организатору') : state.game.registrationOpen || state.game.editingOpen ? 'Передумали? Обновите пожелания — ваш Санта увидит изменения' : 'Посмотреть сохранённую карточку'}</p></div></summary><div class="editor-body letter-card">${participantForm(member)}</div></details><p class="member-note">Вручение — <strong>1 января 2027 года</strong>.<br>Бюджет подарка — <strong>$50–100</strong>.</p></div></div></section>`;
+}
+
+function notificationPanel() {
+  if (!state.participant) return '';
+  const notes = state.notifications || [];
+  return `<section class="card notification-panel"><div class="card-topline"><h3>Новости вашей игры</h3>${notes.some(note => !note.readAt) ? '<button class="text-button" data-action="read-notifications">Прочитано</button>' : ''}</div>${notes.length ? `<ul>${notes.slice(0, 5).map(note => `<li class="${note.readAt ? '' : 'is-unread'}"><strong>${note.kind === 'gift' ? 'Ваш Санта выбрал подарок! 🎁' : 'Ваш получатель определился с пожеланиями ✨'}</strong><p>${note.kind === 'gift' ? 'Тайный Санта определился с подарком для вас. Имя и подарок останутся сюрпризом до встречи.' : 'Откройте конверт и посмотрите актуальное письмо — появились или изменились идеи для подарка.'}</p></li>`).join('')}</ul>` : '<p>Здесь появятся новости о пожеланиях получателя и готовности вашего подарка.</p>'}</section>`;
+}
+
+function emailPanel() {
+  const prefs = state.email || {};
+  return `<section class="card email-panel"><h3>Письма с новостями 🎄</h3><p>Оставьте свою почту: мы сообщим, когда получатель обновит пожелания или ваш Тайный Санта выберет подарок. Адрес видите только вы.</p>${!prefs.deliveryConfigured ? '<p class="notice">Организатор ещё не подключил отправку писем. Новости уже доступны на сайте; почту можно сохранить заранее.</p>' : prefs.enabled ? `<p class="email-status">${prefs.verified ? '✓ Почта подтверждена, уведомления включены.' : 'Подтвердите почту по ссылке в письме. Проверьте также папку «Спам»; ссылка действует сутки.'}</p>` : ''}${prefs.deliveryFailed ? '<p class="form-error">Не удалось доставить часть писем. Сообщите организатору, чтобы он проверил подключение почты.</p>' : prefs.deliveryPending ? '<p class="field-hint">Есть письма в очереди на отправку. При сбое сайт повторит попытку.</p>' : ''}<form id="email-form"><label for="notification-email">Ваша электронная почта</label><input id="notification-email" type="email" name="email" maxlength="254" autocomplete="email" value="${escape(prefs.email)}" placeholder="you@example.com" /><label class="toggle-label"><input type="checkbox" name="enabled" ${prefs.enabled ? 'checked' : ''} /><span>Хочу получать уведомления об этой игре</span></label><p class="field-hint">Можно отключить в любой момент. Почта не попадёт в карточку для Санты или других участников.</p><p class="form-error" id="email-error" role="alert"></p><button class="button button-secondary button-small" type="submit">${prefs.enabled && !prefs.verified && prefs.deliveryConfigured ? 'Сохранить / повторить подтверждение' : 'Сохранить настройки почты'}</button></form></section>`;
+}
+
+function mailSetup() {
+  const mail = state.admin?.mail || {};
+  return `<section class="card mail-setup"><h3>Отправка уведомлений по почте</h3><p>${mail.configured ? `Подключён отправитель: ${escape(mail.from)}.` : 'Чтобы письма доходили до участников, подключите один почтовый ящик отправителя.'} Участники указывают свои адреса в личных карточках.</p><details><summary>${mail.configured ? 'Изменить подключение' : 'Подключить почту'}</summary><form id="mail-setup-form"><label for="mail-provider">Почтовый сервис</label><select id="mail-provider" name="provider">${[['gmail','Gmail'],['yandex','Яндекс'],['mailru','Mail.ru']].map(([value,label]) => `<option value="${value}" ${mail.provider === value ? 'selected' : ''}>${label}</option>`).join('')}</select><label for="mail-from">Адрес отправителя</label><input id="mail-from" name="from" type="email" maxlength="254" value="${escape(mail.from)}" required autocomplete="username" /><label for="mail-password">Пароль приложения</label><input id="mail-password" name="password" type="password" maxlength="200" autocomplete="new-password" ${mail.configured ? '' : 'required'} /><p class="field-hint">Используйте отдельный пароль приложения, созданный в настройках почты. Для Gmail сначала включите двухэтапную аутентификацию. Пароль хранится только на этом компьютере и в закрытых резервных копиях; сайт не показывает его повторно.</p><p class="form-error" id="mail-setup-error" role="alert"></p><button class="button button-primary button-small" type="submit">Проверить и подключить</button></form></details></section>`;
 }
 
 function participantRow(participant) {
@@ -327,7 +401,7 @@ function adminView() {
   const drawn = state.game.phase === 'drawn';
   const canDraw = people.length >= 2 && approved === people.length && ready === people.length;
   const cutoffPassed = Date.now() >= Date.parse(state.game.deadline);
-  return `<section class="admin-intro"><span class="eyebrow">Всё для семейного праздника</span><h1>Кабинет организатора</h1><p>Приглашайте близких, проверяйте карточки и запускайте новогоднее волшебство.</p></section>${savedLink()}<div class="admin-stats"><div class="stat"><strong>${people.length}</strong><span>участников<br>в семейной игре</span></div><div class="stat"><strong>${approved}</strong><span>участие<br>подтверждено</span></div><div class="stat"><strong>${ready}</strong><span>карточек<br>готово к жеребьёвке</span></div></div>${personalInvitations()}<div class="admin-layout"><section class="card admin-card"><div class="card-topline"><h2>Наша семья</h2><button class="text-button" data-action="refresh" aria-label="Обновить список участников">${icon('refresh')} Обновить</button></div>${people.length ? `<ul class="participant-list">${people.map(participantRow).join('')}</ul>` : '<div class="empty-state"><span class="empty-icon" aria-hidden="true">✧</span>Здесь пока тихо.<br>Отправьте общую ссылку в семейную группу.</div>'}${!drawn ? '<details class="add-person"><summary>＋ Добавить участника вручную</summary><form id="add-person-form"><label class="sr-only" for="add-name">Имя участника</label><input id="add-name" name="name" maxlength="60" placeholder="Имя участника" required /><button class="button button-primary button-small" type="submit">Добавить</button><p class="form-error" id="add-person-error" role="alert"></p></form><p class="field-hint">После добавления передайте человеку личную ссылку для заполнения карточки.</p></details>' : '<p class="admin-footnote">Чтобы изменить состав участников, сначала отмените жеребьёвку.</p>'}</section><aside class="admin-side"><section class="card"><span class="eyebrow">Вся семья по одной ссылке</span><h3 class="invite-heading">Пригласим близких</h3><p class="card-description">Отправьте общее приглашение в семейную группу. Каждый заполнит свою карточку и получит личный доступ.</p><button class="button button-secondary button-full" data-action="copy-invitation">${icon('copy')} Скопировать приглашение</button><p class="admin-footnote">Не отправляйте в группу ссылку организатора или чью-либо личную ссылку.</p></section><section class="card"><div class="card-topline"><h3 class="game-heading">Ход игры</h3><span class="status-pill ${drawn ? '' : state.game.registrationOpen ? '' : 'status-closed'}">${drawn ? 'Имена назначены' : state.game.registrationOpen ? 'Приём открыт' : 'Приём закрыт'}</span></div>${drawn ? '<p class="card-description">Конверты готовы. Участники уже могут открыть своих получателей.</p>' : `<p class="card-description">Для жеребьёвки нужны хотя бы два участника. Подтвердите всех и дождитесь готовых карточек.</p><button class="button button-primary button-full" data-action="draw" ${canDraw ? '' : 'disabled'}>${icon('gift')} Провести жеребьёвку</button>${!canDraw ? `<p class="admin-footnote">${people.length < 2 ? 'Пригласите ещё участников.' : `${people.length - approved ? `Ожидают подтверждения: ${people.length - approved}. ` : ''}${people.length - ready ? `Не заполнили карточку: ${people.length - ready}.` : ''}`}</p>` : ''}`}<div class="action-group"><h4>Приём новых карточек</h4><p>До 25 декабря включительно, по времени Ташкента. Приём можно закончить раньше.</p>${!drawn ? `<button class="button button-quiet button-full" data-action="${state.game.registrationOpen ? 'close-registration' : 'open-registration'}" ${!state.game.registrationOpen && cutoffPassed ? 'disabled' : ''}>${state.game.registrationOpen ? 'Закрыть приём карточек' : cutoffPassed ? 'Срок приёма завершён' : 'Открыть приём карточек'}</button>` : '<p>Завершён после жеребьёвки.</p>'}</div><div class="action-group"><label class="toggle-label"><input id="editing-toggle" type="checkbox" data-action="set-editing" ${state.game.editingOpen ? 'checked' : ''} /><span>Разрешить менять пожелания после закрытия приёма</span></label></div>${drawn ? '<div class="action-group"><h4>Изменить состав или назначения</h4><p>Отмена аннулирует все выданные конверты. После изменений потребуется новая жеребьёвка.</p><button class="button button-quiet button-full" data-action="reset">Отменить жеребьёвку</button></div>' : ''}</section></aside></div>${drawn ? `<section class="section assignments-section"><div class="section-intro"><div><span class="eyebrow">Только для организатора</span><h2>Кто кого порадует</h2><p>Каждый дарит один подарок и получает один подарок.</p></div></div>${state.admin.assignments.length ? `<div class="table-wrap"><table><thead><tr><th scope="col">Тайный Санта</th><th aria-label="дарит" class="arrow-cell">→</th><th scope="col">Получатель</th></tr></thead><tbody>${state.admin.assignments.map(pair => `<tr><td>${escape(pair.giverName)}</td><td class="arrow-cell" aria-hidden="true">→</td><td>${escape(pair.recipientName)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="admin-info">Назначения пока не появились. Обновите страницу.</p>'}</section>` : '<div class="section"></div>'}`;
+  return `<section class="admin-intro"><span class="eyebrow">Всё для семейного праздника</span><h1>Кабинет организатора</h1><p>Приглашайте близких, проверяйте карточки и запускайте новогоднее волшебство.</p></section>${savedLink()}<div class="admin-stats"><div class="stat"><strong>${people.length}</strong><span>участников<br>в семейной игре</span></div><div class="stat"><strong>${approved}</strong><span>участие<br>подтверждено</span></div><div class="stat"><strong>${ready}</strong><span>карточек<br>готово к жеребьёвке</span></div></div>${personalInvitations()}${mailSetup()}<div class="admin-layout"><section class="card admin-card"><div class="card-topline"><h2>Наша семья</h2><button class="text-button" data-action="refresh" aria-label="Обновить список участников">${icon('refresh')} Обновить</button></div>${people.length ? `<ul class="participant-list">${people.map(participantRow).join('')}</ul>` : '<div class="empty-state"><span class="empty-icon" aria-hidden="true">✧</span>Здесь пока тихо.<br>Отправьте общую ссылку в семейную группу.</div>'}${!drawn ? '<details class="add-person"><summary>＋ Добавить участника вручную</summary><form id="add-person-form"><label class="sr-only" for="add-name">Имя участника</label><input id="add-name" name="name" maxlength="60" placeholder="Имя участника" required /><button class="button button-primary button-small" type="submit">Добавить</button><p class="form-error" id="add-person-error" role="alert"></p></form><p class="field-hint">После добавления передайте человеку личную ссылку для заполнения карточки.</p></details>' : '<p class="admin-footnote">Чтобы изменить состав участников, сначала отмените жеребьёвку.</p>'}</section><aside class="admin-side"><section class="card"><span class="eyebrow">Вся семья по одной ссылке</span><h3 class="invite-heading">Пригласим близких</h3><p class="card-description">Отправьте общее приглашение в семейную группу. Каждый заполнит свою карточку и получит личный доступ.</p><button class="button button-secondary button-full" data-action="copy-invitation">${icon('copy')} Скопировать приглашение</button><p class="admin-footnote">Не отправляйте в группу ссылку организатора или чью-либо личную ссылку.</p></section><section class="card"><div class="card-topline"><h3 class="game-heading">Ход игры</h3><span class="status-pill ${drawn ? '' : state.game.registrationOpen ? '' : 'status-closed'}">${drawn ? 'Имена назначены' : state.game.registrationOpen ? 'Приём открыт' : 'Приём закрыт'}</span></div>${drawn ? '<p class="card-description">Конверты готовы. Участники уже могут открыть своих получателей.</p>' : `<p class="card-description">Для жеребьёвки нужны хотя бы два участника. Подтвердите всех и дождитесь готовых карточек.</p><button class="button button-primary button-full" data-action="draw" ${canDraw ? '' : 'disabled'}>${icon('gift')} Провести жеребьёвку</button>${!canDraw ? `<p class="admin-footnote">${people.length < 2 ? 'Пригласите ещё участников.' : `${people.length - approved ? `Ожидают подтверждения: ${people.length - approved}. ` : ''}${people.length - ready ? `Не заполнили карточку: ${people.length - ready}.` : ''}`}</p>` : ''}`}<div class="action-group"><h4>Приём новых карточек</h4><p>До 25 декабря включительно, по времени Ташкента. Приём можно закончить раньше.</p>${!drawn ? `<button class="button button-quiet button-full" data-action="${state.game.registrationOpen ? 'close-registration' : 'open-registration'}" ${!state.game.registrationOpen && cutoffPassed ? 'disabled' : ''}>${state.game.registrationOpen ? 'Закрыть приём карточек' : cutoffPassed ? 'Срок приёма завершён' : 'Открыть приём карточек'}</button>` : '<p>Завершён после жеребьёвки.</p>'}</div><div class="action-group"><label class="toggle-label"><input id="editing-toggle" type="checkbox" data-action="set-editing" ${state.game.editingOpen ? 'checked' : ''} /><span>Разрешить менять пожелания после закрытия приёма</span></label></div>${drawn ? '<div class="action-group"><h4>Изменить состав или назначения</h4><p>Отмена аннулирует все выданные конверты. После изменений потребуется новая жеребьёвка.</p><button class="button button-quiet button-full" data-action="reset">Отменить жеребьёвку</button></div>' : ''}</section></aside></div>${drawn ? `<section class="section assignments-section"><div class="section-intro"><div><span class="eyebrow">Только для организатора</span><h2>Кто кого порадует</h2><p>Каждый дарит один подарок и получает один подарок.</p></div></div>${state.admin.assignments.length ? `<div class="table-wrap"><table><thead><tr><th scope="col">Тайный Санта</th><th aria-label="дарит" class="arrow-cell">→</th><th scope="col">Получатель</th></tr></thead><tbody>${state.admin.assignments.map(pair => `<tr><td>${escape(pair.giverName)}</td><td class="arrow-cell" aria-hidden="true">→</td><td>${escape(pair.recipientName)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="admin-info">Назначения пока не появились. Обновите страницу.</p>'}</section>` : '<div class="section"></div>'}`;
 }
 
 function renderNavigation() {
@@ -433,7 +507,7 @@ document.addEventListener('click', async event => {
     if (!textarea.value.includes(prompt.text)) {
       const value = [textarea.value.trim(), prompt.text].filter(Boolean).join('\n');
       if (value.length > textarea.maxLength) { notify('Сократите пожелания перед добавлением примера.', true); return; }
-      textarea.value = value; formDirty = true;
+      textarea.value = value; formDirty = true; captureDraft();
     }
     textarea.focus(); textarea.scrollIntoView({ block: 'center', behavior: 'smooth' }); return;
   }
@@ -462,10 +536,12 @@ document.addEventListener('click', async event => {
   if (action === 'select-profile') {
     const profile = state.profiles?.find(profile => profile.id === button.dataset.profile && !profile.claimed);
     if (!profile || state.participant || !state.game.registrationOpen) return;
-    if (selectedProfileId !== profile.id && formDirty && !await ask('Открыть другое письмо?', 'Несохранённые пожелания будут удалены.', 'Открыть')) return;
+    if (selectedProfileId !== profile.id && formDirty && !await ask('Открыть другое письмо?', 'Черновик сохранится на этом устройстве.', 'Открыть')) return;
+    captureDraft();
     selectedProfileId = profile.id;
     draft = null;
     formDirty = false;
+    restoreDraft();
     render();
     document.querySelector('#participation')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     document.querySelector('.avatar-panel-name')?.setAttribute('tabindex', '-1');
@@ -473,7 +549,7 @@ document.addEventListener('click', async event => {
     return;
   }
   if (action === 'change-profile') {
-    if (formDirty && !await ask('Выбрать другого участника?', 'Несохранённые пожелания будут удалены. Для выбранного участника откроется пустое письмо.', 'Выбрать другого')) return;
+    if (formDirty && !await ask('Выбрать другого участника?', 'Черновик сохранится на этом устройстве. Для другого участника откроется его письмо.', 'Выбрать другого')) return;
     selectedProfileId = null;
     draft = null;
     formDirty = false;
@@ -490,6 +566,18 @@ document.addEventListener('click', async event => {
     editor.scrollIntoView({ block: 'start', behavior: 'smooth' });
     document.querySelector('#member-wishes')?.focus({ preventScroll: true });
     return;
+  }
+  if (action === 'discard-draft') {
+    if (!await ask('Загрузить сохранённую карточку?', 'Ваш локальный черновик будет заменён последней сохранённой карточкой.', 'Загрузить карточку')) return;
+    clearDraft(); render(); return;
+  }
+  if (action === 'keep-draft') {
+    if (!state.participant || !draft) return;
+    if (!await ask('Оставить ваш вариант?', 'После сравнения можно заменить сохранённые пожелания вашим черновиком. Для отправки затем нажмите «Сохранить изменения».', 'Оставить мой вариант')) return;
+    draft.revision = state.participant.revision; persistDraft(); render(); return;
+  }
+  if (action === 'read-notifications') {
+    await task(button, async () => { await post('/api/notifications/read', {}); await refresh(); }); return;
   }
   if (action === 'close-access') { document.querySelector('#access-dialog').close(); return; }
   if (action === 'dismiss-link') {
@@ -537,6 +625,7 @@ document.addEventListener('click', async event => {
     if (!await ask('Завершить сеанс?', 'Убедитесь, что сохранили свою личную ссылку, а если вы организатор — и ссылку организатора. Они понадобятся для следующего входа.', 'Выйти')) return;
     await task(button, async () => {
       await post('/api/logout', {});
+      clearDraft();
       personalLink = null; draft = null; formDirty = false; revealed = false; selectedProfileId = null;
       activeTab = 'member';
       await refresh();
@@ -560,14 +649,19 @@ document.addEventListener('click', async event => {
 });
 
 document.addEventListener('input', event => {
-  if (event.target.closest('#participant-form')) formDirty = true;
+  if (event.target.closest('#participant-form')) { formDirty = true; captureDraft(); }
 });
+
+window.addEventListener('pagehide', captureDraft);
+window.addEventListener('offline', () => { connectionLost = true; captureDraft(); updateDraftStatus(); });
+window.addEventListener('online', () => { refresh().catch(() => {}); });
 
 document.addEventListener('change', async event => {
   if (event.target.matches('input[data-workshop]')) {
     const checkbox = event.target, key = checkbox.dataset.workshop;
     if (busy) { checkbox.checked = Boolean(state.workshop?.[key]); return; }
     const checked = checkbox.checked;
+    if (key === 'idea' && checked && !await ask('Сообщить, что подарок выбран?', 'Получатель узнает, что его Тайный Санта определился с подарком. Ваше имя и сам подарок останутся секретом.', 'Да, сообщить')) { checkbox.checked = false; return; }
     await task(null, async () => {
       await request('/api/workshop', { method: 'PATCH', body: JSON.stringify({ [key]: checked }) });
       await refresh(); notify('Отметка сохранена только для вас.');
@@ -593,19 +687,33 @@ document.addEventListener('submit', async event => {
   event.preventDefault();
   if (busy) return;
   const button = form.querySelector('button[type="submit"]');
-  if (form.id === 'participant-form') {
-    const error = document.querySelector('#participant-error');
+  if (form.id === 'email-form') {
     await task(button, async () => {
+      const values = new FormData(form);
+      await post('/api/email', { participantId: state.participant.id, email: String(values.get('email') || ''), enabled: values.get('enabled') === 'on' });
+      await refresh(); notify('Настройки почты сохранены.');
+    }, document.querySelector('#email-error'));
+  } else if (form.id === 'mail-setup-form') {
+    await task(button, async () => {
+      const values = new FormData(form);
+      await post('/api/admin/mail', { provider: values.get('provider'), from: values.get('from'), password: values.get('password') });
+      form.reset(); await refresh(); notify('Отправка писем подключена.');
+    }, document.querySelector('#mail-setup-error'));
+  } else if (form.id === 'participant-form') {
+    const error = document.querySelector('#participant-error');
+    const controls = [...form.querySelectorAll('input, textarea')].map(control => [control, control.readOnly]);
+    for (const [control] of controls) control.readOnly = true;
+    try { await task(button, async () => {
       const body = getFormData(form);
       const existing = Boolean(state.participant);
       const data = existing ? await request('/api/me', { method: 'PATCH', body: JSON.stringify(body) }) : await post('/api/participants', body);
       if (data.personalUrl) personalLink = { url: data.personalUrl, name: body.name };
-      draft = null; formDirty = false; letterJustSent = true;
+      clearDraft(); letterJustSent = true;
       await refresh();
       setTimeout(() => { letterJustSent = false; document.querySelector('.stamp-just-sent')?.classList.remove('stamp-just-sent'); }, 1400);
       document.querySelector('#participation')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
       notify(existing ? 'Пожелания сохранены. Ваш Санта увидит обновления.' : 'Карточка готова! Не забудьте сохранить личную ссылку.');
-    }, error);
+    }, error); } finally { for (const [control, readOnly] of controls) if (control.isConnected) control.readOnly = readOnly; }
   } else if (form.id === 'access-form') {
     const error = document.querySelector('#access-error');
     await task(button, async () => {
@@ -655,6 +763,10 @@ async function start() {
   }
   try {
     await refresh();
+    if (params.has('verify-email')) {
+      try { await post('/api/email/verify', { token: params.get('verify-email') }); await refresh(); notify('Почта подтверждена. Уведомления включены!'); }
+      catch (error) { notify(error.message, true); }
+    }
     if (params.has('organizer')) openOrganizer();
     if (type === 'personal' && state.participant && !state.participant.ready) {
       document.querySelector('.detail-editor')?.scrollIntoView({ block: 'start', behavior: 'instant' });
@@ -674,7 +786,7 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('hashchange', () => {
   const params = new URLSearchParams(location.hash.slice(1));
-  if (['invite', 'personal', 'admin', 'organizer'].some(type => params.has(type))) location.reload();
+  if (['invite', 'personal', 'admin', 'organizer', 'verify-email'].some(type => params.has(type))) location.reload();
 });
 
 start();

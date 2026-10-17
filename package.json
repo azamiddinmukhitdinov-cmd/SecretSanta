@@ -11,5 +11,8 @@
     "start": "node src/server.mjs",
     "test": "node --test",
     "access": "node scripts/access.mjs"
+  },
+  "dependencies": {
+    "nodemailer": "10.1.2"
   }
 }

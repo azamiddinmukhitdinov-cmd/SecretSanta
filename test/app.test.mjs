@@ -67,6 +67,14 @@ async function fixture(t, initialTime = BEFORE_DEADLINE, { profiles, beforeStart
     const jar = new Map();
     return {
       async request(path, { method = 'GET', body, origin = f.origin } = {}) {
+        if (path === '/api/me' && method === 'PATCH' && body && !Object.hasOwn(body, 'revision')) {
+          const own = await this.state();
+          if (own.participant) body = { ...body, revision: own.participant.revision };
+        }
+        if (path === '/api/me' && method === 'PATCH' && body && !Object.hasOwn(body, 'participantId')) {
+          const own = await this.state();
+          if (own.participant) body = { ...body, participantId: own.participant.id };
+        }
         const headers = {};
         if (jar.size) headers.Cookie = [...jar].map(([key, value]) => `${key}=${value}`).join('; ');
         if (method !== 'GET' && method !== 'HEAD') headers.Origin = origin;
@@ -239,7 +247,7 @@ test('nine-person draw gives exactly one unique recipient per person and reveals
     assert.equal(state.participant.id, member.participant.id);
     assert.notEqual(state.recipient.id, member.participant.id);
     assert.ok(ids.has(state.recipient.id));
-    assert.deepEqual(Object.keys(state.recipient).sort(), ['avoid', 'id', 'links', 'name', 'profile', 'profileId', 'wishes']);
+    assert.deepEqual(Object.keys(state.recipient).sort(), ['avoid', 'id', 'links', 'name', 'profile', 'profileId', 'updatedAt', 'wishes']);
     assert.equal(state.recipient.profileId, null);
     assert.equal(state.recipient.profile, null);
     recipients.add(state.recipient.id);
@@ -300,6 +308,78 @@ test('wish updates stay available after the deadline and draw, persist and reach
   const other = [b, c].find(member => member !== giver);
   assert.ok(!JSON.stringify(await other.client.state()).includes(update.wishes));
   assert.ok(!JSON.stringify(await invited.state()).includes(update.wishes));
+});
+
+test('parallel cards stay isolated, stale saves are rejected and a shared browser cannot save into another identity', async t => {
+  const f = await fixture(t), admin = await f.admin();
+  const a = await f.add(admin, card('Параллельный А')), b = await f.add(admin, card('Параллельный Б'));
+  const edit = (member, wishes, revision = 1) => member.client.request('/api/me', { method: 'PATCH', body: { participantId: member.participant.id, revision, wishes } });
+  const results = await Promise.all([edit(a, 'Книга А'), edit(b, 'Игра Б')]);
+  results.forEach(result => expectStatus(result, 200));
+  assert.equal((await a.client.state()).participant.wishes, 'Книга А');
+  assert.equal((await b.client.state()).participant.wishes, 'Игра Б');
+  const aTab = await f.personal(a.personalUrl);
+  const race = await Promise.all([edit(a, 'Новая книга', 2), aTab.request('/api/me', { method: 'PATCH', body: { participantId: a.participant.id, revision: 2, wishes: 'Другой вариант' } })]);
+  assert.deepEqual(race.map(result => result.status).sort(), [200, 409]);
+  assert.equal((await a.client.state()).participant.revision, 3);
+  expectStatus(await b.client.request('/api/me', { method: 'PATCH', body: { participantId: a.participant.id, revision: 2, wishes: 'Чужие пожелания' } }), 409);
+  assert.equal((await b.client.state()).participant.wishes, 'Игра Б');
+  expectStatus(await edit(a, 'Не должен сохраниться', 0), 428);
+});
+
+test('optional email preferences are private, validated and scoped to the personal identity', async t => {
+  const f = await fixture(t), admin = await f.admin();
+  const a = await f.add(admin, card('Почта А')), b = await f.add(admin, card('Почта Б'));
+  const prefs = { participantId: a.participant.id, email: 'private-a@example.invalid', enabled: true };
+  expectStatus(await a.client.request('/api/email', { method: 'POST', body: prefs }), 200);
+  const own = await a.client.state();
+  assert.equal(own.email.email, prefs.email);
+  assert.equal(own.email.verified, false);
+  assert.equal(own.email.deliveryConfigured, false);
+  expectStatus(await b.client.request('/api/email', { method: 'POST', body: prefs }), 409);
+  expectStatus(await a.client.request('/api/email', { method: 'POST', body: { ...prefs, email: 'invalid\r\nTo: victim@example.invalid' } }), 400);
+  expectStatus(await a.client.request('/api/admin/mail', { method: 'POST', body: {} }), 403);
+  const db = new DatabaseSync(join(f.dataDir, 'santa.sqlite'));
+  const verifyToken = 'V'.repeat(43);
+  try { db.prepare('UPDATE mail_preferences SET verification_hash=?,verification_expires=? WHERE participant_id=?').run(createHash('sha256').update(verifyToken).digest('hex'), Date.parse(BEFORE_DEADLINE) + 86400000, a.participant.id); }
+  finally { db.close(); }
+  const anonymous = f.client();
+  expectStatus(await anonymous.request('/api/email/verify', { method: 'POST', body: { token: verifyToken } }), 200);
+  assert.equal((await anonymous.state()).access, 'locked', 'Email confirmation must never authenticate a participant');
+  expectStatus(await anonymous.request('/api/email/verify', { method: 'POST', body: { token: verifyToken } }), 400);
+  expectStatus(await (await f.invited()).request('/api/email', { method: 'POST', body: prefs }), 403);
+  expectStatus(await f.action(admin, 'draw'), 200);
+  assert.ok(!JSON.stringify(await b.client.state()).includes(prefs.email));
+  assert.ok(!JSON.stringify(await admin.state()).includes(prefs.email));
+  await f.restart();
+  assert.equal((await a.client.state()).email.email, prefs.email);
+  expectStatus(await a.client.request('/api/email', { method: 'POST', body: { ...prefs, email: '', enabled: false } }), 200);
+  assert.equal((await a.client.state()).email.enabled, false);
+});
+
+test('notifications go only to the assigned giver or recipient and gift updates keep the Santa anonymous', async t => {
+  const f = await fixture(t), admin = await f.admin();
+  const members = [];
+  for (let i = 0; i < 3; i++) members.push(await f.add(admin, card(`Участник ${i}`)));
+  expectStatus(await f.action(admin, 'draw'), 200);
+  for (const member of members) assert.equal((await member.client.state()).notifications.length, 1);
+  const a = members[0], before = await a.client.state();
+  expectStatus(await a.client.request('/api/workshop', { method: 'PATCH', body: { idea: true } }), 200);
+  const receiver = members.find(member => member.participant.id === before.recipient.id);
+  const notice = (await receiver.client.state()).notifications[0];
+  assert.equal(notice.kind, 'gift');
+  assert.deepEqual(Object.keys(notice).sort(), ['createdAt', 'id', 'kind', 'readAt']);
+  expectStatus(await a.client.request('/api/workshop', { method: 'PATCH', body: { idea: false } }), 200);
+  expectStatus(await a.client.request('/api/workshop', { method: 'PATCH', body: { idea: true } }), 200);
+  assert.equal((await receiver.client.state()).notifications.filter(note => note.kind === 'gift').length, 1);
+  expectStatus(await receiver.client.request('/api/notifications/read', { method: 'POST', body: {} }), 200);
+  assert.ok((await receiver.client.state()).notifications.every(note => note.readAt));
+  assert.ok(!Object.hasOwn(await admin.state(), 'notifications'));
+  assert.ok(!Object.hasOwn(await (await f.invited()).state(), 'notifications'));
+  await f.restart();
+  assert.equal((await receiver.client.state()).notifications[0].readAt, notice.createdAt);
+  expectStatus(await f.action(await f.admin(), 'reset', { confirm: true }), 200);
+  assert.deepEqual((await receiver.client.state()).notifications, []);
 });
 
 test('organizer can lock post-close wish updates and the choice survives draw, reset and restart', async t => {
@@ -561,7 +641,7 @@ test('migration from schema v1 preserves cards, credentials and existing assignm
   assert.equal(own.recipient.wishes, 'Сохранённые пожелания Б');
   const db = new DatabaseSync(join(f.dataDir, 'santa.sqlite'), { readOnly: true });
   try {
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 5);
     assert.ok(db.prepare('PRAGMA table_info(participants)').all().some(column => column.name === 'profile_id'));
     assert.ok(db.prepare('PRAGMA index_list(participants)').all().some(index => index.name === 'participants_profile_id_unique' && index.unique));
   } finally { db.close(); }
@@ -588,7 +668,7 @@ test('invalid private profile configuration fails startup instead of silently ex
       const dataDir = await mkdtemp(join(tmpdir(), 'secret-santa-invalid-profiles-'));
       inner.after(() => rm(dataDir, { recursive: true, force: true }));
       await writeFile(join(dataDir, 'family-profiles.json'), JSON.stringify(profiles), { mode: 0o600 });
-      assert.throws(() => createApp({ dataDir, rateLimit: false }), /family-profiles\.json/);
+      await assert.rejects(() => createApp({ dataDir, rateLimit: false }), /family-profiles\.json/);
     });
   }
 });
