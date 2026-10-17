@@ -29,7 +29,7 @@ function client() {
   const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8').replace(/^start\(\);$/m, '');
   vm.runInContext(source + `\nglobalThis.api = {
     setState(value) { state=value; }, select(id) { selectedProfileId=id; },
-    familyPortrait, holidayMood, countdownText, participantForm, workshopPanel,
+    familyPortrait, holidayMood, countdownText, participantForm, workshopPanel, memberView,
     personalInvitations, rememberInvitation, invitationMessage, render, openOrganizer, start
   };`, context);
   return { api: context.api, elements, handlers, setTime: value => { now = Date.parse(value); }, mockState: value => { responseState = value; }, replacedUrl: () => replacedUrl };
@@ -116,6 +116,32 @@ test('public organizer entry requests private organizer access instead of granti
   assert.ok(!c.elements.get('#main').innerHTML.includes('Кабинет организатора'));
   assert.ok(c.elements.get('#navigation').innerHTML.includes('data-action="open-organizer"'));
   assert.equal(c.replacedUrl(), '/#organizer');
+});
+
+test('participants can open and edit their wishes after the draw, while identity stays fixed', async () => {
+  const c = client(), s = state();
+  s.access = 'participant';
+  s.game.registrationOpen = false;
+  s.game.editingOpen = true;
+  s.game.phase = 'drawn';
+  s.participant = { name: 'Тест', wishes: 'Книга', avoid: '', links: [], ready: true, approved: true };
+  c.api.setState(s);
+  assert.match(c.api.memberView(), /data-action="edit-wishes"[^>]*>Изменить пожелания/);
+  assert.match(c.api.memberView(), /id="wish-editor"/);
+  const form = c.api.participantForm(s.participant);
+  assert.match(form, /id="member-name"[^>]*readonly/);
+  assert.doesNotMatch(form.match(/<textarea id="member-wishes"[^>]*>/)[0], /disabled/);
+  let scrolled = false, focused = false;
+  const editor = { open: false, scrollIntoView() { scrolled = true; } };
+  c.elements.set('.detail-editor', editor);
+  c.elements.set('#member-wishes', { focus() { focused = true; } });
+  const button = { dataset: { action: 'edit-wishes' }, disabled: false, getAttribute() { return null; }, matches() { return false; } };
+  await c.handlers.click({ target: { closest: () => button } });
+  assert.equal(editor.open, true);
+  assert.ok(scrolled && focused);
+  s.game.editingOpen = false;
+  assert.ok(!c.api.memberView().includes('data-action="edit-wishes"'));
+  assert.match(c.api.participantForm(s.participant), /id="member-wishes"[^>]*disabled/);
 });
 
 test('public organizer entry opens the cabinet directly for an existing organizer session', async () => {

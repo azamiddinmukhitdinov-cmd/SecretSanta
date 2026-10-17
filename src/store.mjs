@@ -105,7 +105,7 @@ export function createStore(directory) {
       id INTEGER PRIMARY KEY CHECK(id = 1),
       phase TEXT NOT NULL DEFAULT 'registration' CHECK(phase IN ('registration', 'drawn')),
       registration_closed INTEGER NOT NULL DEFAULT 0,
-      editing_open INTEGER NOT NULL DEFAULT 0,
+      editing_open INTEGER NOT NULL DEFAULT 1,
       draw_version INTEGER NOT NULL DEFAULT 0
     );
     INSERT OR IGNORE INTO settings(id) VALUES (1);
@@ -147,7 +147,11 @@ export function createStore(directory) {
     if (!db.prepare('PRAGMA table_info(participants)').all().some(column => column.name === 'profile_id')) {
       db.exec('ALTER TABLE participants ADD COLUMN profile_id TEXT');
     }
-    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS participants_profile_id_unique ON participants(profile_id); PRAGMA user_version = 3; COMMIT;');
+    // Enable wish updates once for existing games; later organizer choices persist.
+    if (db.prepare('PRAGMA user_version').get().user_version < 4) {
+      db.exec('UPDATE settings SET editing_open = 1 WHERE id = 1');
+    }
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS participants_profile_id_unique ON participants(profile_id); PRAGMA user_version = 4; COMMIT;');
   } catch (error) {
     db.exec('ROLLBACK');
     db.close();
@@ -224,7 +228,7 @@ export function createStore(directory) {
     const value = validateCard({ ...current, ...input });
     if (current.profileId && value.name !== current.name) throw new AppError(409, 'Имя участника на семейном фото изменить нельзя. Обратитесь к организатору.');
     if (!current.profileId && value.name !== current.name && profileByName.has(value.normalizedName)) throw new AppError(409, 'Для участника на семейном фото нужно создать отдельную карточку по приглашению.');
-    if (s.phase === 'drawn' && value.name !== current.name) throw new AppError(409, 'После жеребьёвки можно менять только пожелания и ссылки.');
+    if (!registrationOpen(now) && value.name !== current.name) throw new AppError(409, 'После закрытия приёма можно менять только пожелания и ссылки.');
     const duplicate = db.prepare('SELECT id FROM participants WHERE normalized_name = ? AND id <> ?').get(value.normalizedName, id);
     if (duplicate) throw new AppError(409, 'Карточка с таким именем уже есть. Уточните имя.');
     const approved = value.name === current.name ? (current.approved ? 1 : 0) : 0;
@@ -258,7 +262,7 @@ export function createStore(directory) {
       const insert = db.prepare('INSERT INTO assignments(giver_id,recipient_id,draw_version) VALUES (?,?,?)');
       db.prepare('DELETE FROM gift_progress').run();
       ids.forEach((id, index) => insert.run(id, receivers[index], version));
-      db.prepare("UPDATE settings SET phase='drawn', registration_closed=1, editing_open=0, draw_version=? WHERE id=1").run(version);
+      db.prepare("UPDATE settings SET phase='drawn', registration_closed=1, draw_version=? WHERE id=1").run(version);
       return { ok: true };
     }
     if (action === 'reset') {
@@ -266,7 +270,7 @@ export function createStore(directory) {
       if (settings().phase !== 'drawn') throw new AppError(409, 'Активной жеребьёвки пока нет.');
       db.prepare('DELETE FROM assignments').run();
       db.prepare('DELETE FROM gift_progress').run();
-      db.prepare("UPDATE settings SET phase='registration',editing_open=0,draw_version=draw_version+1 WHERE id=1").run();
+      db.prepare("UPDATE settings SET phase='registration',draw_version=draw_version+1 WHERE id=1").run();
       return { ok: true };
     }
     if (action === 'set-editing') {

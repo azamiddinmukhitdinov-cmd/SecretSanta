@@ -255,13 +255,68 @@ test('nine-person draw gives exactly one unique recipient per person and reveals
   expectStatus(await f.action(admin, 'draw'), 409);
   expectStatus(await admin.request('/api/admin/participants', { method: 'POST', body: card('Поздний участник') }), 409);
   expectStatus(await f.action(admin, 'remove', { id: members[0].participant.id }), 409);
-  expectStatus(await members[0].client.request('/api/me', { method: 'PATCH', body: { wishes: 'Новые пожелания' } }), 409);
-  expectStatus(await f.action(admin, 'set-editing', { enabled: true }), 200);
+  assert.equal(organizer.game.editingOpen, true);
   expectStatus(await members[0].client.request('/api/me', { method: 'PATCH', body: { wishes: 'Новые пожелания' } }), 200);
   const giver = organizer.admin.assignments.find(pair => pair.recipientId === members[0].participant.id);
   const giverClient = members.find(member => member.participant.id === giver.giverId).client;
   assert.equal((await giverClient.state()).recipient.wishes, 'Новые пожелания');
   assert.deepEqual((await admin.state()).admin.assignments, organizer.admin.assignments);
+});
+
+test('wish updates stay available after the deadline and draw, persist and reach only the giver', async t => {
+  const f = await fixture(t);
+  let admin = await f.admin();
+  const a = await f.add(admin, card('Участник А'));
+  const b = await f.add(admin, card('Участник Б'));
+  const c = await f.add(admin, card('Участник В'));
+  f.setTime('2026-12-26T00:00:00+05:00');
+  assert.equal((await a.client.state()).game.registrationOpen, false);
+  const update = { wishes: 'Теперь хочу настольную игру', avoid: 'Без шоколада', links: ['https://example.invalid/gift'] };
+  expectStatus(await a.client.request('/api/me', { method: 'PATCH', body: update }), 200);
+  expectStatus(await a.client.request('/api/me', { method: 'PATCH', body: { name: 'Другое имя' } }), 409);
+  const invited = await f.invited();
+  expectStatus(await invited.request('/api/me', { method: 'PATCH', body: update }), 403);
+  expectStatus(await invited.request('/api/participants', { method: 'POST', body: card('Поздний участник') }), 409);
+  expectStatus(await f.action(admin, 'draw'), 200);
+  const before = await admin.state();
+  const giverId = before.admin.assignments.find(pair => pair.recipientId === a.participant.id).giverId;
+  const giver = [b, c].find(member => member.participant.id === giverId);
+  expectStatus(await giver.client.request('/api/workshop', { method: 'PATCH', body: { bought: true } }), 200);
+  const progress = (await giver.client.state()).workshop;
+  update.wishes = 'Передумал: книга о путешествиях';
+  expectStatus(await a.client.request('/api/me', { method: 'PATCH', body: update }), 200);
+  await f.restart();
+  admin = await f.admin();
+  const own = await a.client.state();
+  assert.equal(own.game.editingOpen, true);
+  for (const key of ['wishes', 'avoid', 'links']) assert.deepEqual(own.participant[key], update[key]);
+  assert.equal(own.participant.name, 'Участник А');
+  assert.equal(own.participant.ready, true);
+  assert.equal(own.participant.approved, true);
+  const giverState = await giver.client.state();
+  for (const key of ['wishes', 'avoid', 'links']) assert.deepEqual(giverState.recipient[key], update[key]);
+  assert.deepEqual(giverState.workshop, progress);
+  assert.deepEqual((await admin.state()).admin.assignments, before.admin.assignments);
+  const other = [b, c].find(member => member !== giver);
+  assert.ok(!JSON.stringify(await other.client.state()).includes(update.wishes));
+  assert.ok(!JSON.stringify(await invited.state()).includes(update.wishes));
+});
+
+test('organizer can lock post-close wish updates and the choice survives draw, reset and restart', async t => {
+  const f = await fixture(t);
+  let admin = await f.admin();
+  const a = await f.add(admin, card('Участник А'));
+  await f.add(admin, card('Участник Б'));
+  expectStatus(await f.action(admin, 'set-editing', { enabled: false }), 200);
+  expectStatus(await f.action(admin, 'draw'), 200);
+  await f.restart();
+  assert.equal((await a.client.state()).game.editingOpen, false);
+  expectStatus(await a.client.request('/api/me', { method: 'PATCH', body: { wishes: 'Новая идея' } }), 409);
+  admin = await f.admin();
+  expectStatus(await f.action(admin, 'reset', { confirm: true }), 200);
+  assert.equal((await a.client.state()).game.editingOpen, false);
+  expectStatus(await f.action(admin, 'set-editing', { enabled: true }), 200);
+  expectStatus(await a.client.request('/api/me', { method: 'PATCH', body: { wishes: 'Новая идея' } }), 200);
 });
 
 test('reset clears every result, advances the draw version and allows roster changes', async t => {
@@ -494,6 +549,7 @@ test('migration from schema v1 preserves cards, credentials and existing assignm
   assert.equal(state.game.phase, 'drawn');
   assert.equal(state.game.drawVersion, 7);
   assert.equal(state.game.participantCount, 2);
+  assert.equal(state.game.editingOpen, true);
   assert.deepEqual(state.admin.assignments.map(pair => [pair.giverId, pair.recipientId]), [['legacy-a', 'legacy-b'], ['legacy-b', 'legacy-a']]);
   assert.ok(state.admin.participants.every(participant => participant.profileId === null && participant.profile === null));
   assert.ok(state.profiles.every(profile => profile.claimed === false));
@@ -505,7 +561,7 @@ test('migration from schema v1 preserves cards, credentials and existing assignm
   assert.equal(own.recipient.wishes, 'Сохранённые пожелания Б');
   const db = new DatabaseSync(join(f.dataDir, 'santa.sqlite'), { readOnly: true });
   try {
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 4);
     assert.ok(db.prepare('PRAGMA table_info(participants)').all().some(column => column.name === 'profile_id'));
     assert.ok(db.prepare('PRAGMA index_list(participants)').all().some(index => index.name === 'participants_profile_id_unique' && index.unique));
   } finally { db.close(); }

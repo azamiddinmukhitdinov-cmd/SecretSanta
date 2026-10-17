@@ -241,8 +241,8 @@ function fields(member, disabled) {
   const chosen = member?.profile || state.profiles?.find(profile => profile.id === selectedProfileId);
   const values = draft || member || (chosen ? { name: chosen.name } : {});
   const linksText = values.linksText ?? (values.links || []).join('\n');
-  const nameFixed = Boolean(chosen) || Boolean(member && state.game.phase === 'drawn');
-  return `<div class="field"><label for="member-name">Как вас зовут <span>обязательно</span></label><input id="member-name" name="name" maxlength="60" autocomplete="nickname" placeholder="Имя, по которому вас узнает семья" value="${escape(values.name)}" required ${disabled ? 'disabled' : ''} ${nameFixed ? 'readonly aria-describedby="name-fixed-hint"' : ''} />${nameFixed ? `<p class="field-hint" id="name-fixed-hint">${chosen ? 'Имя связано с выбранным семейным портретом.' : 'После жеребьёвки имя изменить нельзя.'}</p>` : ''}</div>
+  const nameFixed = Boolean(chosen) || Boolean(member && !state.game.registrationOpen);
+  return `<div class="field"><label for="member-name">Как вас зовут <span>обязательно</span></label><input id="member-name" name="name" maxlength="60" autocomplete="nickname" placeholder="Имя, по которому вас узнает семья" value="${escape(values.name)}" required ${disabled ? 'disabled' : ''} ${nameFixed ? 'readonly aria-describedby="name-fixed-hint"' : ''} />${nameFixed ? `<p class="field-hint" id="name-fixed-hint">${chosen ? 'Имя связано с выбранным семейным портретом.' : 'После закрытия приёма имя изменить нельзя.'}</p>` : ''}</div>
     <div class="field"><label for="member-wishes">Чему вы будете рады?</label><textarea id="member-wishes" name="wishes" maxlength="2000" rows="4" placeholder="Мечта, любимое увлечение или несколько идей для подарка…" ${disabled ? 'disabled' : ''}>${escape(values.wishes)}</textarea><p class="field-hint">Можно написать несколько вариантов — так сюрприз сохранится.</p></div>
     <div class="field"><label for="member-avoid">Что лучше не дарить?</label><textarea class="short" id="member-avoid" name="avoid" maxlength="1000" rows="2" placeholder="Например, сладости или косметику с ароматом" ${disabled ? 'disabled' : ''}>${escape(values.avoid)}</textarea></div>
     <div class="field"><label for="member-links">Ссылки на подарки <span>по желанию</span></label><textarea class="links-input" id="member-links" name="links" rows="2" maxlength="10240" spellcheck="false" placeholder="https://…" ${disabled ? 'disabled' : ''}>${escape(linksText)}</textarea><p class="field-hint">До 5 ссылок, каждая с новой строки. Начните с https:// или http://.</p></div>`;
@@ -282,7 +282,8 @@ function recipientCard() {
 
 function memberView() {
   const member = state.participant;
-  return `<section class="section" id="participation"><div class="member-heading"><div class="member-name"><div class="avatar" aria-hidden="true">${member.profile ? portrait(member.profile, "profile-avatar") : escape(initials(member.name))}</div><div><span class="eyebrow">Ваш уголок волшебства</span><h2>Привет, ${escape(member.name)}!</h2><div class="member-meta"><span class="status-pill ${member.approved ? '' : 'status-pending'}">${member.approved ? 'Участие подтверждено' : 'Ждём подтверждения'}</span><span>${member.ready ? 'Карточка сохранена' : 'Анкета ещё не заполнена'}</span></div></div></div><button class="text-button" data-action="refresh">${icon('refresh')} Обновить</button></div>${savedLink()}<div class="member-grid"><div>${revealed && state.recipient ? recipientCard() : envelopeCard()}${workshopPanel()}<p class="member-note"><strong>Один подарок — одному человеку.</strong> Каждый участник получает подарок от одного Санты. Имена получателей знает организатор.</p></div><div><details class="detail-editor" ${draft?.open || !member.ready ? 'open' : ''}><summary><div><h3>Мои пожелания</h3><p>${!member.ready ? (state.game.registrationOpen || state.game.editingOpen ? 'Заполните пожелания и отправьте письмо Санте' : 'Анкета не заполнена. Обратитесь к организатору') : state.game.registrationOpen || state.game.editingOpen ? 'Посмотреть и изменить карточку' : 'Посмотреть сохранённую карточку'}</p></div></summary><div class="editor-body letter-card">${participantForm(member)}</div></details><p class="member-note">Вручение — <strong>1 января 2027 года</strong>.<br>Бюджет подарка — <strong>$50–100</strong>.</p></div></div></section>`;
+  const canEdit = state.game.registrationOpen || state.game.editingOpen;
+  return `<section class="section" id="participation"><div class="member-heading"><div class="member-name"><div class="avatar" aria-hidden="true">${member.profile ? portrait(member.profile, "profile-avatar") : escape(initials(member.name))}</div><div><span class="eyebrow">Ваш уголок волшебства</span><h2>Привет, ${escape(member.name)}!</h2><div class="member-meta"><span class="status-pill ${member.approved ? '' : 'status-pending'}">${member.approved ? 'Участие подтверждено' : 'Ждём подтверждения'}</span><span>${member.ready ? 'Карточка сохранена' : 'Анкета ещё не заполнена'}</span></div></div></div><div class="member-actions">${canEdit ? `<button class="button button-secondary button-small" type="button" data-action="edit-wishes" aria-controls="wish-editor">${member.ready ? 'Изменить пожелания' : 'Заполнить пожелания'}</button>` : ''}<button class="text-button" data-action="refresh">${icon('refresh')} Обновить</button></div></div>${savedLink()}<div class="member-grid"><div>${revealed && state.recipient ? recipientCard() : envelopeCard()}${workshopPanel()}<p class="member-note"><strong>Один подарок — одному человеку.</strong> Каждый участник получает подарок от одного Санты. Имена получателей знает организатор.</p></div><div><details class="detail-editor" id="wish-editor" ${draft?.open || !member.ready ? 'open' : ''}><summary><div><h3>Мои пожелания</h3><p>${!member.ready ? (state.game.registrationOpen || state.game.editingOpen ? 'Заполните пожелания и отправьте письмо Санте' : 'Анкета не заполнена. Обратитесь к организатору') : state.game.registrationOpen || state.game.editingOpen ? 'Передумали? Обновите пожелания — ваш Санта увидит изменения' : 'Посмотреть сохранённую карточку'}</p></div></summary><div class="editor-body letter-card">${participantForm(member)}</div></details><p class="member-note">Вручение — <strong>1 января 2027 года</strong>.<br>Бюджет подарка — <strong>$50–100</strong>.</p></div></div></section>`;
 }
 
 function participantRow(participant) {
@@ -482,6 +483,14 @@ document.addEventListener('click', async event => {
   }
   if (action === 'open-access') { openAccess(); return; }
   if (action === 'open-organizer') { openOrganizer(); return; }
+  if (action === 'edit-wishes') {
+    const editor = document.querySelector('.detail-editor');
+    if (!editor) return;
+    editor.open = true;
+    editor.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    document.querySelector('#member-wishes')?.focus({ preventScroll: true });
+    return;
+  }
   if (action === 'close-access') { document.querySelector('#access-dialog').close(); return; }
   if (action === 'dismiss-link') {
     personalLink = null;
