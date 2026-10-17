@@ -7,8 +7,10 @@ import vm from 'node:vm';
 function client() {
   const handlers = {};
   const elements = new Map();
-  const element = () => ({ innerHTML: '', textContent: '', classList: { toggle() {}, add() {}, remove() {} }, querySelector() { return null; } });
-  for (const id of ['#main', '#navigation', '#toast']) elements.set(id, element());
+  const element = () => ({ innerHTML: '', textContent: '', open: false, showModal() { this.open = true; }, close() { this.open = false; }, classList: { toggle() {}, add() {}, remove() {} }, querySelector() { return null; } });
+  for (const id of ['#main', '#navigation', '#toast', '#access-dialog', '#access-error', '#access-title', '#access-description']) elements.set(id, element());
+  let responseState = state();
+  let replacedUrl = '';
   let now = Date.parse('2026-12-31T18:59:00Z');
   const context = vm.createContext({
     document: { querySelector: id => elements.get(id) || null, body: element(), addEventListener: (type, handler) => { handlers[type] = handler; } },
@@ -16,15 +18,21 @@ function client() {
     localStorage: { getItem() { return null; } },
     setTimeout: () => 1, clearTimeout() {}, setInterval() {},
     URL, URLSearchParams, Blob,
+    location: { hash: '#organizer', pathname: '/', search: '', origin: 'https://example.invalid' },
+    history: { replaceState(_state, _title, url) { replacedUrl = url; } },
+    fetch: async path => {
+      assert.equal(path, '/api/state', 'Public organizer entry must not send an access token');
+      return { ok: true, json: async () => responseState };
+    },
     Date: class extends Date { static now() { return now; } },
   });
   const source = readFileSync(new URL('../public/app.js', import.meta.url), 'utf8').replace(/^start\(\);$/m, '');
   vm.runInContext(source + `\nglobalThis.api = {
     setState(value) { state=value; }, select(id) { selectedProfileId=id; },
     familyPortrait, holidayMood, countdownText, participantForm, workshopPanel,
-    personalInvitations, rememberInvitation, invitationMessage, render
+    personalInvitations, rememberInvitation, invitationMessage, render, openOrganizer, start
   };`, context);
-  return { api: context.api, elements, handlers, setTime: value => { now = Date.parse(value); } };
+  return { api: context.api, elements, handlers, setTime: value => { now = Date.parse(value); }, mockState: value => { responseState = value; }, replacedUrl: () => replacedUrl };
 }
 
 function state() {
@@ -97,4 +105,25 @@ test('invitation package has per-person messages and workshop renders only its o
   assert.ok(workshop.includes('Готово 1 из 3'));
   const own = { name: 'Тест', wishes: '', avoid: '', links: [], ready: true, approved: true, profile: s.profiles[0], profileId: 'a' };
   assert.ok(c.api.participantForm(own).includes('ДОСТАВЛЕНО'));
+});
+
+test('public organizer entry requests private organizer access instead of granting permissions', async () => {
+  const c = client();
+  await c.api.start();
+  assert.equal(c.elements.get('#access-dialog').open, true);
+  assert.equal(c.elements.get('#access-title').textContent, 'Вход организатора');
+  assert.ok(c.elements.get('#access-description').textContent.includes('личную ссылку организатора'));
+  assert.ok(!c.elements.get('#main').innerHTML.includes('Кабинет организатора'));
+  assert.ok(c.elements.get('#navigation').innerHTML.includes('data-action="open-organizer"'));
+  assert.equal(c.replacedUrl(), '/#organizer');
+});
+
+test('public organizer entry opens the cabinet directly for an existing organizer session', async () => {
+  const c = client(), s = state();
+  s.access = 'organizer';
+  s.admin = { participants: [], assignments: [], invitationUrl: 'https://example.invalid/#invite=TEST' };
+  c.mockState(s);
+  await c.api.start();
+  assert.ok(c.elements.get('#main').innerHTML.includes('Кабинет организатора'));
+  assert.equal(c.elements.get('#access-dialog').open, false);
 });

@@ -15,6 +15,7 @@ let pollSequence = 0;
 let selectedProfileId = null;
 let invitationBatch = [];
 let letterJustSent = false;
+let organizerLogin = false;
 let motionPaused = false;
 try { motionPaused = localStorage.getItem('santa-motion-paused') === 'true'; } catch {}
 
@@ -330,6 +331,23 @@ function adminView() {
 
 function renderNavigation() {
   navigation.innerHTML = state.access === 'organizer' ? `<button class="nav-button ${activeTab === 'member' ? 'active' : ''}" data-tab="member">Моя карточка</button><button class="nav-button ${activeTab === 'admin' ? 'active' : ''}" data-tab="admin">Организатор</button><button class="nav-button nav-exit" data-action="logout" aria-label="Выйти"><span>Выйти</span>${icon('exit', 'mobile-exit')}</button>` : state.access === 'participant' || state.access === 'invited' ? `<span class="nav-label">Семейный круг</span><button class="nav-button nav-exit" data-action="logout" aria-label="Выйти"><span>Выйти</span>${icon('exit', 'mobile-exit')}</button>` : '<span class="nav-label">Только для своих</span>';
+  if (state.access !== 'organizer') navigation.innerHTML += '<button class="nav-button" data-action="open-organizer">Организатор</button>';
+}
+
+function openAccess(organizer = false) {
+  organizerLogin = organizer;
+  document.querySelector('#access-error').textContent = '';
+  document.querySelector('#access-title').textContent = organizer ? 'Вход организатора' : 'Ваш маленький секрет';
+  document.querySelector('#access-description').textContent = organizer
+    ? 'Вставьте вашу личную ссылку организатора из чата. После входа вы получите полное управление игрой; браузер запомнит доступ на 30 дней.'
+    : 'Вставьте приглашение или личную ссылку, которую вы сохранили раньше.';
+  document.querySelector('#access-dialog').showModal();
+}
+
+function openOrganizer() {
+  if (state.access === 'organizer') {
+    captureDraft(); activeTab = 'admin'; render();
+  } else openAccess(true);
 }
 
 function render() {
@@ -462,11 +480,8 @@ document.addEventListener('click', async event => {
     document.querySelector('#participation')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
     return;
   }
-  if (action === 'open-access') {
-    document.querySelector('#access-error').textContent = '';
-    document.querySelector('#access-dialog').showModal();
-    return;
-  }
+  if (action === 'open-access') { openAccess(); return; }
+  if (action === 'open-organizer') { openOrganizer(); return; }
   if (action === 'close-access') { document.querySelector('#access-dialog').close(); return; }
   if (action === 'dismiss-link') {
     personalLink = null;
@@ -591,11 +606,13 @@ document.addEventListener('submit', async event => {
       const params = new URLSearchParams(url.hash.slice(1));
       const type = ['invite', 'personal', 'admin'].find(type => params.has(type));
       if (!type || !params.get(type)) throw new Error('В ссылке не найден личный доступ. Скопируйте её целиком.');
+      if (organizerLogin && type !== 'admin') throw new Error('Для управления нужна именно личная ссылка организатора из чата.');
       await post('/api/access', { type, token: params.get(type) });
       if (type === 'admin') activeTab = 'admin';
       initialError = ''; personalLink = null; draft = null; formDirty = false; revealed = false; selectedProfileId = null;
       form.reset();
       document.querySelector('#access-dialog').close();
+      organizerLogin = false;
       await refresh();
       if (type === 'personal' && state.participant && !state.participant.ready) {
         document.querySelector('.detail-editor')?.scrollIntoView({ block: 'start', behavior: 'instant' });
@@ -620,7 +637,7 @@ async function start() {
   const type = ['invite', 'personal', 'admin'].find(type => params.has(type));
   const token = type ? params.get(type) : null;
   // Секретная часть ссылки сразу исчезает из адресной строки и истории.
-  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search + (params.has('organizer') ? '#organizer' : ''));
   if (type && token) {
     try {
       await post('/api/access', { type, token });
@@ -629,6 +646,7 @@ async function start() {
   }
   try {
     await refresh();
+    if (params.has('organizer')) openOrganizer();
     if (type === 'personal' && state.participant && !state.participant.ready) {
       document.querySelector('.detail-editor')?.scrollIntoView({ block: 'start', behavior: 'instant' });
     }
@@ -647,7 +665,7 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('hashchange', () => {
   const params = new URLSearchParams(location.hash.slice(1));
-  if (['invite', 'personal', 'admin'].some(type => params.has(type))) location.reload();
+  if (['invite', 'personal', 'admin', 'organizer'].some(type => params.has(type))) location.reload();
 });
 
 start();
